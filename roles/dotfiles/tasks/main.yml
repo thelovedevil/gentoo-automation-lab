@@ -1,0 +1,72 @@
+---
+# Role: dotfiles — deploy operator's emacs config + tool configs from host.
+# Stage B. Copies from the Ansible controller (host) to the guest.
+# Source: {{ controller_dotfiles_path }} on the Kali WSL host.
+
+- name: "[B] Create .emacs.d directory"
+  ansible.builtin.file:
+    path: "{{ operator_home }}/.emacs.d"
+    state: directory
+    owner: "{{ operator_user }}"
+    group: "{{ operator_user }}"
+    mode: "0755"
+
+- name: "[B] Deploy .emacs.d (init.el, config.org, config.el, custom.el)"
+  ansible.builtin.copy:
+    src: "{{ item.src }}"
+    dest: "{{ operator_home }}/.emacs.d/{{ item.name }}"
+    owner: "{{ operator_user }}"
+    group: "{{ operator_user }}"
+    mode: "0644"
+  loop:
+    - { src: "{{ controller_dotfiles_path }}/.emacs.d/init.el", name: "init.el" }
+    - { src: "{{ controller_dotfiles_path }}/.emacs.d/config.org", name: "config.org" }
+    - { src: "{{ controller_dotfiles_path }}/.emacs.d/config.el", name: "config.el" }
+    - { src: "{{ controller_dotfiles_path }}/.emacs.d/custom.el", name: "custom.el" }
+
+- name: "[B] Create .emacs.d subdirectories"
+  ansible.builtin.file:
+    path: "{{ operator_home }}/.emacs.d/{{ item }}"
+    state: directory
+    owner: "{{ operator_user }}"
+    group: "{{ operator_user }}"
+    mode: "0755"
+  loop:
+    - themes
+    - backups
+    - auto-saves
+    - auto-save
+
+- name: "[B] Deploy laintheme"
+  ansible.builtin.copy:
+    src: {{ controller_dotfiles_path }}/.emacs.d/themes/laintheme-theme.el
+    dest: "{{ operator_home }}/.emacs.d/themes/laintheme-theme.el"
+    owner: "{{ operator_user }}"
+    group: "{{ operator_user }}"
+    mode: "0644"
+
+- name: "[B] Deploy tool configs (amass, ffuf, katana, nuclei, subfinder)"
+  ansible.builtin.copy:
+    src: "{{ controller_dotfiles_path }}/.config/{{ item }}/"
+    dest: "{{ operator_home }}/.config/{{ item }}/"
+    owner: "{{ operator_user }}"
+    group: "{{ operator_user }}"
+    mode: "0644"
+    directory_mode: "0755"
+  loop:
+    - amass
+    - ffuf
+    - katana
+    - nuclei
+    - subfinder
+  ignore_errors: true
+
+- name: "[B] Deploy git config"
+  ansible.builtin.copy:
+    src: {{ controller_dotfiles_path }}/.config/git/
+    dest: "{{ operator_home }}/.config/git/"
+    owner: "{{ operator_user }}"
+    group: "{{ operator_user }}"
+    mode: "0644"
+    directory_mode: "0755"
+  ignore_errors: true

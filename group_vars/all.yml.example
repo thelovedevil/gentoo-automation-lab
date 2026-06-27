@@ -1,0 +1,188 @@
+---
+# ============================================================================
+# gentoo-build :: single source of truth for the portable Gentoo image build.
+# Phase 1 = bake a PORTABLE x86-64-v3 image (QEMU/KVM oven, here in WSL2).
+# Phase 2 = boot on metal (target hardware) off external SSD, then hardware-tune.
+# ============================================================================
+
+# ---- Disk / image ----------------------------------------------------------
+image_name: gentoo_staging.qcow2
+image_size: 40G
+disk_dev: /dev/vda            # virtio in QEMU; becomes nvme0n1/sda on metal
+                              # -> fstab/bootloader key on PARTUUID, never this.
+
+# ---- Partitioning (GPT + UEFI) ---------------------------------------------
+part_scheme: gpt
+esp_size: 512MiB
+esp_fs: vfat
+root_fs: ext4                 # ext4 = simplest/portable; xfs optional
+luks_enabled: false           # INVARIANT: off for the portable base image
+                              # (encrypted root complicates QEMU->metal boot).
+                              # Re-enable on the metal deployment (Phase 2).
+
+# ---- stage3 ----------------------------------------------------------------
+stage3_arch: amd64
+stage3_variant: openrc        # OpenRC, NOT systemd
+stage3_mirror: https://distfiles.gentoo.org
+stage3_verify_gpg: true       # verify signature (mirror gentooinstall's approach)
+
+# ---- make.conf  (INVARIANT: -march=x86-64-v3, NEVER -march=native) ----------
+make_common_flags: "-O2 -pipe -march=x86-64-v3"
+make_opts: "-j3"              # reduced from -j5; 4GB VM OOMs on heavy compiles
+make_use: "X -gnome -kde -systemd -consolekit elogind ssl networkmanager policykit introspection vterm"
+make_video_cards: ""          # none in the portable image; modesetting driver (generic). GPU/CUDA = Phase 2
+make_grub_platforms: "efi-64"
+
+# ---- TLS stack (compile-time fingerprint lever; research-relevant) ----------
+tls_provider: openssl         # openssl | libressl    [DECISION: openssl]
+
+# ---- Kernel ----------------------------------------------------------------
+kernel_source: gentoo-kernel  # dist-kernel = generic/portable default; gentoo-sources = manual (your wheelhouse, Phase-2 tuning)
+kernel_preempt: voluntary     # tickless now; PREEMPT_RT = Phase-2 metal option
+kernel_lsm: tomoyo            # TOMOYO MAC in-kernel (hardening choice)
+# Dual-driver INVARIANT: kernel + initramfs carry BOTH virtio AND metal drivers
+kernel_drivers_virtio: true   # virtio-blk/scsi/net (QEMU)
+kernel_drivers_metal: true    # NVMe, AHCI, common NICs (bare-metal dual-boot)
+# Network knobs compiled in (Phase-1 safe set; eBPF/XDP deferred to Phase 2)
+kernel_net_features:
+  - netfilter_advanced
+  - conntrack
+  - multiple_routing_tables   # policy routing
+  - sched_qdiscs              # tc/qdisc shaping
+  - netns                     # network namespaces
+
+# ---- initramfs (INVARIANT: generic, not host-only -> dual-boot) -------------
+initramfs_tool: dracut
+dracut_hostonly: false        # --no-hostonly == carries broad driver set
+
+# ---- Bootloader (UEFI) -----------------------------------------------------
+bootloader: grub              # grub (broad compat) | systemd-boot
+bootloader_uefi: true
+
+# ---- build-time credential (localhost build oven ONLY; Stage B switches keys-only)
+build_root_password: "CHANGEME"   # CHANGE ME — used only for the Stage A->B SSH handoff
+operator_pubkey: ""                   # set to your SSH pubkey -> Stage B locks sshd keys-only
+
+# ---- Runtime foundations (LLM orchestration / LLM orchestration prereqs) ------------
+runtime_python: "python3.13"  # match current Linux ecosystem
+runtime_venv: /opt/llm-venv
+runtime_pip_pkgs:
+  - langgraph
+  - langgraph-sdk
+  - langgraph-checkpoint
+  - langgraph-prebuilt
+  - langchain
+  - langchain-core
+  - langchain-community
+  - langchain-anthropic
+  - langchain-ollama
+  - langchain-text-splitters
+  - anthropic
+  - ollama
+  - llama-cpp-python    # CPU-only now; GPU backend = Phase 2
+  - aiohttp
+  - beautifulsoup4
+  - cryptography
+  - httpx
+  - requests
+  - black
+  - ruff
+
+# ---- Desktop environment (bspwm stack) ------------------------------------
+desktop_wm: bspwm
+desktop_packages:
+  - x11-wm/bspwm
+  - x11-misc/sxhkd
+  - x11-terms/sakura
+  - x11-misc/picom
+  - x11-misc/polybar
+  - x11-misc/dmenu
+  - x11-misc/xdotool
+  - x11-apps/xrandr
+  - x11-apps/xsetroot
+  - x11-apps/xinit
+  - x11-base/xorg-server
+  - x11-base/xorg-drivers
+  - media-fonts/dejavu
+  - media-fonts/noto
+  - media-fonts/liberation-fonts
+
+# ---- Editor ---------------------------------------------------------------
+editor_package: app-editors/emacs
+editor_support_packages:
+  - dev-vcs/git           # magit
+  - dev-libs/libvterm     # vterm
+  - llvm-core/clang       # clangd for eglot C/C++
+  - dev-python/python-lsp-server  # pylsp for eglot python
+
+# ---- Operator user --------------------------------------------------------
+operator_user: operator
+operator_shell: /bin/bash
+operator_home: /home/operator
+
+# ---- Offensive toolchain --------------------------------------------------
+# Portage-available (emerge)
+offensive_portage:
+  - net-analyzer/nmap
+  - net-analyzer/nikto
+  - app-crypt/hashcat
+  # johntheripper-jumbo: compile fails in VM; install manually on metal
+  - net-analyzer/hydra
+  - dev-db/sqlmap
+  - net-analyzer/masscan
+
+# Go-install (need dev-lang/go first)
+offensive_go:
+  - github.com/projectdiscovery/nuclei/v3/cmd/nuclei@latest
+  - github.com/projectdiscovery/httpx/cmd/httpx@latest
+  - github.com/projectdiscovery/subfinder/v2/cmd/subfinder@latest
+  - github.com/projectdiscovery/katana/cmd/katana@latest
+  - github.com/projectdiscovery/dnsx/cmd/dnsx@latest
+  - github.com/d3mondev/puredns/v2@latest
+  - github.com/ffuf/ffuf/v2@latest
+  - github.com/OJ/gobuster/v3@latest
+  - github.com/hahwul/dalfox/v2@latest
+
+# Rust-install (need dev-lang/rust first)
+offensive_rust:
+  - feroxbuster
+  - rustscan
+
+# Pip-install (into operator venv)
+offensive_pip:
+  - arjun
+  # wfuzz: broken metadata on PyPI; install manually
+  # whatweb: not in portage or pip; install from git
+
+# Wordlists
+wordlist_packages:
+  # seclists not in main tree; installed via git clone in offensive role
+
+# ---- Networking / VPN / anonymity -----------------------------------------
+network_packages:
+  - net-vpn/wireguard-tools
+  - net-vpn/openvpn
+  - net-misc/proxychains
+  - net-vpn/tor
+  - net-misc/socat
+  - net-analyzer/tcpdump
+  - net-analyzer/wireshark   # CLI tshark; GUI optional
+  - net-misc/curl
+  - net-misc/wget
+
+# ---- CLI utilities --------------------------------------------------------
+cli_packages:
+  - app-misc/tmux
+  - sys-apps/ripgrep
+  - sys-apps/fd
+  - app-misc/jq
+  - app-shells/bash-completion
+  - sys-process/htop
+  - app-misc/screen
+
+# ---- QEMU (build oven) -----------------------------------------------------
+qemu_mem: 4096
+qemu_smp: 4
+ovmf_code: /usr/share/OVMF/OVMF_CODE_4M.fd       # this host ships the 4M build
+ovmf_vars_src: /usr/share/OVMF/OVMF_VARS_4M.fd
+ssh_host_port: 2222           # localhost:2222 -> guest:22

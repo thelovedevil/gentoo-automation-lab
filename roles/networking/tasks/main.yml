@@ -1,0 +1,21 @@
+---
+# Role: networking — VPN, anonymity, packet analysis, advanced net tooling.
+# Stage B. Wireguard module is in the dist-kernel; tools-only here.
+
+- name: "[B] Set wireshark to CLI-only (no Qt GUI)"
+  ansible.builtin.copy:
+    dest: /etc/portage/package.use/wireshark
+    mode: "0644"
+    content: "net-analyzer/wireshark -qt6\n"
+
+- name: "[B] Install networking / VPN / anonymity packages"
+  ansible.builtin.command: >-
+    emerge --noreplace {{ network_packages | join(' ') }}
+  changed_when: true
+  async: 7200
+  poll: 60
+
+- name: "[B] Enable tor service (stopped by default; manual start)"
+  ansible.builtin.command: rc-update add tor default
+  changed_when: true
+  ignore_errors: true

@@ -1,0 +1,42 @@
+---
+# Stage B — full provision of the installed Gentoo after first boot.
+# Connects to the booted guest (root@127.0.0.1:2222).
+
+- name: "Stage B :: full provision"
+  hosts: gentoo_guest
+  gather_facts: true
+  vars:
+    build_stage: b
+
+  pre_tasks:
+    # Update make.conf FIRST so all emerge runs see the X USE flag
+    - name: "[B] Update make.conf USE flags"
+      ansible.builtin.lineinfile:
+        path: /etc/portage/make.conf
+        regexp: '^USE='
+        line: 'USE="{{ make_use }}"'
+
+    - name: "[B] Update make.conf MAKEOPTS"
+      ansible.builtin.lineinfile:
+        path: /etc/portage/make.conf
+        regexp: '^MAKEOPTS='
+        line: 'MAKEOPTS="{{ make_opts }}"'
+
+    - name: "[B] Create operator user {{ operator_user }}"
+      ansible.builtin.user:
+        name: "{{ operator_user }}"
+        shell: "{{ operator_shell }}"
+        groups: wheel,video,audio,input
+        append: true
+        create_home: true
+
+  roles:
+    - role: portage
+    - role: cli
+    - role: networking
+    - role: desktop
+    - role: editor
+    - role: runtime
+    - role: offensive
+    - role: dotfiles
+    - role: hardening

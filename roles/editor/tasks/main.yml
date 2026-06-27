@@ -1,0 +1,11 @@
+---
+# Role: editor — Emacs (GUI, X11) + LSP support packages.
+# Stage B. Emacs config is deployed by the dotfiles role.
+
+- name: "[B] Install Emacs + support packages"
+  ansible.builtin.command: >-
+    emerge --noreplace {{ editor_package }}
+    {{ editor_support_packages | join(' ') }}
+  changed_when: true
+  async: 7200
+  poll: 60

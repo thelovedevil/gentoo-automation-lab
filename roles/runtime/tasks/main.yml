@@ -1,0 +1,34 @@
+---
+# Role: runtime — Python 3.13 + LLM/orchestration stack (LLM orchestration).
+# Stage B. GPU/llama.cpp CUDA backend = Phase 2; CPU-only llama-cpp-python here.
+
+- name: "[B] Install Python {{ runtime_python }} + pip + venv"
+  ansible.builtin.command: >-
+    emerge --noreplace dev-lang/python:3.13 dev-python/pip dev-python/virtualenv
+  changed_when: true
+  async: 3600
+  poll: 30
+
+- name: "[B] Create LLM orchestration venv ({{ runtime_venv }})"
+  ansible.builtin.command: "python3.13 -m venv {{ runtime_venv }}"
+  args:
+    creates: "{{ runtime_venv }}/bin/activate"
+
+- name: "[B] Install LLM/orchestration stack into venv"
+  ansible.builtin.command: >-
+    {{ runtime_venv }}/bin/pip install {{ runtime_pip_pkgs | join(' ') }}
+  changed_when: true
+  async: 3600
+  poll: 30
+
+- name: "[B] Wire venv into operator environment"
+  ansible.builtin.blockinfile:
+    path: "{{ operator_home }}/.bash_profile"
+    create: true
+    owner: "{{ operator_user }}"
+    group: "{{ operator_user }}"
+    mode: "0644"
+    marker: "# {mark} MANAGED BY gentoo-automation-lab/runtime"
+    block: |
+      export SHIKIGAMI_VENV="{{ runtime_venv }}"
+      alias llm-orchestration-activate='source {{ runtime_venv }}/bin/activate'

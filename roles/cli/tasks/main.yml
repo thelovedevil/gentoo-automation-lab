@@ -1,0 +1,10 @@
+---
+# Role: cli — tmux, ripgrep, fd, jq, htop, bash-completion, etc.
+# Stage B.
+
+- name: "[B] Install CLI utilities"
+  ansible.builtin.command: >-
+    emerge --noreplace {{ cli_packages | join(' ') }}
+  changed_when: true
+  async: 3600
+  poll: 30

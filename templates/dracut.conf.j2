@@ -1,0 +1,4 @@
+# Managed by gentoo-build. Generic (NOT host-only) -> boots QEMU AND metal.
+hostonly="{{ 'yes' if dracut_hostonly else 'no' }}"
+# Force-include both virtio and bare-metal storage/net drivers.
+add_drivers+=" virtio_blk virtio_scsi virtio_net virtio_pci nvme ahci "

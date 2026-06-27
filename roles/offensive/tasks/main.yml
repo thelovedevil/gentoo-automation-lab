@@ -1,0 +1,86 @@
+---
+# Role: offensive — recon/attack toolchain.
+# Stage B. Three tiers: portage (emerge), Go (go install), Rust (cargo install).
+
+# ---- Tier 1: portage packages ----
+- name: "[B] Install offensive tools from portage"
+  ansible.builtin.shell: >-
+    ACCEPT_KEYWORDS="~amd64" emerge --noreplace --autounmask-write --autounmask-continue
+    {{ offensive_portage | join(' ') }}
+  changed_when: true
+  async: 7200
+  poll: 60
+
+# ---- Tier 2: Go toolchain + ProjectDiscovery/community tools ----
+- name: "[B] Install Go compiler"
+  ansible.builtin.command: emerge --noreplace dev-lang/go
+  changed_when: true
+  async: 3600
+  poll: 30
+
+- name: "[B] Create Go workspace for {{ operator_user }}"
+  ansible.builtin.file:
+    path: "{{ operator_home }}/go/bin"
+    state: directory
+    owner: "{{ operator_user }}"
+    group: "{{ operator_user }}"
+    mode: "0755"
+
+- name: "[B] Install Go offensive tools"
+  ansible.builtin.command: >-
+    su - {{ operator_user }} -c 'GOPATH={{ operator_home }}/go go install {{ item }}'
+  loop: "{{ offensive_go }}"
+  changed_when: true
+  async: 1800
+  poll: 30
+  ignore_errors: true
+
+# ---- Tier 3: Rust toolchain + cargo tools ----
+- name: "[B] Install Rust compiler"
+  ansible.builtin.command: emerge --noreplace dev-lang/rust-bin
+  changed_when: true
+  async: 3600
+  poll: 30
+
+- name: "[B] Install Rust offensive tools"
+  ansible.builtin.command: >-
+    su - {{ operator_user }} -c 'cargo install {{ item }}'
+  loop: "{{ offensive_rust }}"
+  changed_when: true
+  async: 1800
+  poll: 30
+  ignore_errors: true
+
+# ---- Tier 4: pip tools (into operator-local venv) ----
+- name: "[B] Create offensive pip venv"
+  ansible.builtin.command: >-
+    su - {{ operator_user }} -c 'python3 -m venv {{ operator_home }}/.local/offensive-venv'
+  args:
+    creates: "{{ operator_home }}/.local/offensive-venv/bin/activate"
+
+- name: "[B] Install pip offensive tools"
+  ansible.builtin.command: >-
+    su - {{ operator_user }} -c '{{ operator_home }}/.local/offensive-venv/bin/pip install {{ offensive_pip | join(" ") }}'
+  changed_when: true
+  ignore_errors: true
+
+# ---- Tier 5: seclists (git clone) ----
+- name: "[B] Clone SecLists wordlists"
+  ansible.builtin.git:
+    repo: https://github.com/danielmiessler/SecLists.git
+    dest: /opt/seclists
+    depth: 1
+  ignore_errors: true
+
+# ---- PATH wiring ----
+- name: "[B] Wire Go + Rust + offensive-venv into operator PATH"
+  ansible.builtin.blockinfile:
+    path: "{{ operator_home }}/.bash_profile"
+    create: true
+    owner: "{{ operator_user }}"
+    group: "{{ operator_user }}"
+    mode: "0644"
+    marker: "# {mark} MANAGED BY gentoo-automation-lab/offensive"
+    block: |
+      export GOPATH="{{ operator_home }}/go"
+      export PATH="{{ operator_home }}/go/bin:{{ operator_home }}/.cargo/bin:{{ operator_home }}/.local/offensive-venv/bin:$PATH"

@@ -1,0 +1,72 @@
+---
+# Role: stage3 — resolve latest, fetch, GPG-verify, unpack into /mnt/gentoo.
+#
+# Ported from gentooinstall/download_config_portage.py (the curses installer):
+#   wget stage3 from autobuilds, gpg key import/recv, gpg --verify, sha256 check,
+#   tar xpJf --xattrs-include='*.*' --numeric-owner.
+# NOTE: their installer used the hardened-selinux-openrc variant; we default to
+#   vanilla {{ stage3_variant }} (+ TOMOYO, NOT SELinux). Switch via group_vars
+#   (e.g. stage3_variant: hardened-openrc) for the hardened profile.
+
+- name: "Resolve latest stage3 ({{ stage3_arch }}/{{ stage3_variant }})"
+  ansible.builtin.uri:
+    url: "{{ stage3_mirror }}/releases/{{ stage3_arch }}/autobuilds/latest-stage3-{{ stage3_arch }}-{{ stage3_variant }}.txt"
+    return_content: true
+  register: _latest_txt
+
+- name: Parse stage3 path + filename from the pointer file
+  ansible.builtin.set_fact:
+    stage3_relpath: "{{ (_latest_txt.content.splitlines() | map('trim') | reject('match', '^#') | reject('match', '^-') | reject('equalto', '') | select('match', '.*stage3.*') | first).split() | first }}"
+
+- name: Set stage3 URL + local filename facts
+  ansible.builtin.set_fact:
+    stage3_url: "{{ stage3_mirror }}/releases/{{ stage3_arch }}/autobuilds/{{ stage3_relpath }}"
+    stage3_file: "{{ stage3_relpath | basename }}"
+
+- name: Show resolved stage3
+  ansible.builtin.debug:
+    msg: "stage3 = {{ stage3_file }}  (from {{ stage3_url }})"
+
+- name: Download stage3 tarball into /mnt/gentoo
+  ansible.builtin.get_url:
+    url: "{{ stage3_url }}"
+    dest: "/mnt/gentoo/{{ stage3_file }}"
+    mode: "0644"
+
+- name: Download stage3 GPG signature (.asc)
+  ansible.builtin.get_url:
+    url: "{{ stage3_url }}.asc"
+    dest: "/mnt/gentoo/{{ stage3_file }}.asc"
+    mode: "0644"
+  when: stage3_verify_gpg | bool
+
+- name: Import Gentoo release GPG key (local keyring, fallback keyserver)
+  ansible.builtin.shell: |
+    set -e
+    if [ -f /usr/share/openpgp-keys/gentoo-release.asc ]; then
+      gpg --import /usr/share/openpgp-keys/gentoo-release.asc
+    else
+      gpg --keyserver hkps://keys.gentoo.org --recv-keys 13EBBDBEDE7A12775DFDB1BABB572E0E2D182910
+    fi
+  when: stage3_verify_gpg | bool
+  changed_when: false
+
+- name: Verify stage3 signature (gpg --verify)
+  ansible.builtin.command:
+    cmd: "gpg --verify /mnt/gentoo/{{ stage3_file }}.asc /mnt/gentoo/{{ stage3_file }}"
+  when: stage3_verify_gpg | bool
+  changed_when: false
+
+- name: Unpack stage3 into /mnt/gentoo (preserve xattrs + numeric owner)
+  ansible.builtin.command:
+    cmd: "tar xpf {{ stage3_file }} --xattrs-include=*.* --numeric-owner"
+    chdir: /mnt/gentoo
+    creates: /mnt/gentoo/etc/gentoo-release
+
+- name: Remove stage3 tarball + signature after unpack
+  ansible.builtin.file:
+    path: "/mnt/gentoo/{{ item }}"
+    state: absent
+  loop:
+    - "{{ stage3_file }}"
+    - "{{ stage3_file }}.asc"

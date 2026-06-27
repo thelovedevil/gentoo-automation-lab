@@ -1,0 +1,28 @@
+---
+# Phase 2 — LUKS encrypt the root partition on metal.
+#
+# Run from a LIVE USB/ISO booted on the target machine, NOT from the
+# installed Gentoo (we're wiping and re-creating root).
+#
+# Usage:
+#   ansible-playbook -i inventory_metal.ini phase2_luks.yml \
+#     -e luks_target_disk=/dev/sda \
+#     -e luks_passphrase=<your-passphrase> \
+#     -k
+#
+# For NVMe drives:
+#   -e luks_target_disk=/dev/nvme0n1 -e luks_part_separator=p
+#
+# The passphrase can also be stored in ansible-vault for automation.
+
+- name: "Phase 2 :: LUKS encrypt root partition"
+  hosts: metal_live
+  gather_facts: true
+  vars:
+    # Target disk — set via -e on the command line
+    # luks_target_disk: /dev/sda          # SATA/USB SSD
+    # luks_target_disk: /dev/nvme0n1      # NVMe
+    luks_part_separator: ""               # "" for /dev/sdaX, "p" for /dev/nvme0n1pX
+    luks_backup_path: /tmp                # where to store rootfs tarball during migration
+  roles:
+    - role: luks

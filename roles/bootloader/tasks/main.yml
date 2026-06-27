@@ -1,0 +1,47 @@
+---
+# Role: bootloader — UEFI GRUB (--removable, portable) + PARTUUID fstab, plus the
+# base finalization (network + sshd + root cred) that makes the booted image
+# reachable for Stage B. Stage A (runs in/around the chroot).
+
+- name: "[A] Render fstab (PARTUUID — dual-boot invariant)"
+  ansible.builtin.template:
+    src: fstab.j2
+    dest: /mnt/gentoo/etc/fstab
+    mode: "0644"
+
+- name: "[A] Install GRUB (UEFI) + efibootmgr + dhcpcd (chroot)"
+  ansible.builtin.command: "chroot /mnt/gentoo /bin/bash -lc 'emerge --noreplace sys-boot/grub sys-boot/efibootmgr net-misc/dhcpcd'"
+  changed_when: true
+  async: 3600
+  poll: 30
+
+- name: "[A] grub-install (UEFI, --removable so it boots arbitrary metal)"
+  ansible.builtin.command: >-
+    chroot /mnt/gentoo /bin/bash -lc
+    'grub-install --target=x86_64-efi --efi-directory=/boot/efi --removable'
+  changed_when: true
+
+- name: "[A] Generate grub.cfg"
+  ansible.builtin.command: "chroot /mnt/gentoo /bin/bash -lc 'grub-mkconfig -o /boot/grub/grub.cfg'"
+  changed_when: true
+
+# ---- base finalization: make the booted image reachable for Stage B ----
+- name: "[A] Enable dhcpcd + sshd at boot (OpenRC)"
+  ansible.builtin.command: "chroot /mnt/gentoo /bin/bash -lc 'rc-update add {{ item }} default'"
+  loop: [dhcpcd, sshd]
+  changed_when: true
+
+- name: "[A] Allow root + password SSH at build time (Stage-B hardening keys-only later)"
+  ansible.builtin.lineinfile:
+    path: /mnt/gentoo/etc/ssh/sshd_config
+    regexp: "{{ item.re }}"
+    line: "{{ item.line }}"
+    create: true
+  loop:
+    - { re: '^#?PermitRootLogin', line: 'PermitRootLogin yes' }
+    - { re: '^#?PasswordAuthentication', line: 'PasswordAuthentication yes' }
+
+- name: "[A] Set build-time root password (rotated/keyed in Stage B hardening)"
+  ansible.builtin.command: "chroot /mnt/gentoo /bin/bash -lc 'echo root:{{ build_root_password }} | chpasswd'"
+  no_log: true
+  changed_when: true

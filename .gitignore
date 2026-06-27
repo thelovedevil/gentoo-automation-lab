@@ -1,0 +1,23 @@
+# Build artifacts — never commit
+*.qcow2
+*.iso
+*.img
+OVMF_VARS*.fd
+*.local.fd
+
+# Extracted ISO kernel/initrd
+iso-extract/
+
+# Live inventory and credentials
+inventory.ini
+inventory_metal.ini
+group_vars/all.yml
+.vault_pass
+
+# Ansible / Python noise
+*.retry
+__pycache__/
+*.pyc
+
+# Session logs
+serial-observe.log

@@ -1,0 +1,53 @@
+---
+# Role: portage — make.conf + repos + chroot prep (Stage A) / tree sync (Stage B).
+# Branches on build_stage: 'a' (installer, prep chroot) | 'b' (running guest).
+# Stage-A install steps that must run INSIDE the new root use `chroot /mnt/gentoo`.
+
+# ---------- Stage A: configure portage + prepare the chroot ----------
+- name: "[A] Render make.conf"
+  ansible.builtin.template:
+    src: make.conf.j2
+    dest: /mnt/gentoo/etc/portage/make.conf
+    mode: "0644"
+  when: build_stage == 'a'
+
+- name: "[A] Seed repos.conf/gentoo.conf from the stage3 default"
+  ansible.builtin.shell: |
+    mkdir -p /mnt/gentoo/etc/portage/repos.conf
+    cp /mnt/gentoo/usr/share/portage/config/repos.conf \
+       /mnt/gentoo/etc/portage/repos.conf/gentoo.conf
+  args:
+    creates: /mnt/gentoo/etc/portage/repos.conf/gentoo.conf
+  when: build_stage == 'a'
+
+- name: "[A] Copy DNS into the new root"
+  ansible.builtin.copy:
+    src: /etc/resolv.conf
+    dest: /mnt/gentoo/etc/resolv.conf
+    remote_src: true
+    mode: "0644"
+  when: build_stage == 'a'
+
+- name: "[A] Bind-mount pseudo-filesystems for chroot"
+  ansible.builtin.command: "{{ item }}"
+  loop:
+    - mount --types proc /proc /mnt/gentoo/proc
+    - mount --rbind /sys /mnt/gentoo/sys
+    - mount --make-rslave /mnt/gentoo/sys
+    - mount --rbind /dev /mnt/gentoo/dev
+    - mount --make-rslave /mnt/gentoo/dev
+    - mount --bind /run /mnt/gentoo/run
+    - mount --make-slave /mnt/gentoo/run
+  when: build_stage == 'a'
+
+- name: "[A] Sync the ebuild repository (emerge-webrsync, inside chroot)"
+  ansible.builtin.command: "chroot /mnt/gentoo /bin/bash -lc 'emerge-webrsync'"
+  args:
+    creates: /mnt/gentoo/var/db/repos/gentoo/profiles
+  when: build_stage == 'a'
+
+# ---------- Stage B: update the tree on the running guest ----------
+- name: "[B] Sync portage tree"
+  ansible.builtin.command: emerge --sync
+  changed_when: true
+  when: build_stage == 'b'

@@ -1,0 +1,13 @@
+# Stage A: the live Gentoo minimal/admin ISO booted in QEMU (installer env).
+[installer]
+gentoo_installer ansible_host=127.0.0.1 ansible_port=2222 ansible_user=root
+
+# Stage B: the installed Gentoo guest after first boot (same forwarded port).
+[gentoo_guest]
+gentoo_box ansible_host=127.0.0.1 ansible_port=2222 ansible_user=root
+
+[installer:vars]
+ansible_ssh_common_args=-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null
+
+[gentoo_guest:vars]
+ansible_ssh_common_args=-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null

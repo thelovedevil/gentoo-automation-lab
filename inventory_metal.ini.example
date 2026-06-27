@@ -1,0 +1,7 @@
+# Phase 2: live USB/ISO booted on target metal.
+# Update ansible_host and ansible_port to match your live environment.
+[metal_live]
+metal ansible_host=192.168.1.100 ansible_port=22 ansible_user=root
+
+[metal_live:vars]
+ansible_ssh_common_args=-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null

@@ -1,0 +1,15 @@
+---
+# Stage A — bake the portable image by driving the booted Gentoo minimal ISO.
+# Connects to the live installer env (root@127.0.0.1:2222).
+- name: "Stage A :: bake portable Gentoo image"
+  hosts: installer
+  gather_facts: true
+  vars:
+    build_stage: a
+  roles:
+    - role: partition    # GPT ESP+root, format, mount /mnt/gentoo  [port: create_efi.py, fdiskluks.py, block_device_table.py]
+    - role: stage3       # fetch + GPG-verify + unpack stage3        [port: download_config_portage.py]
+    - role: portage      # make.conf, repos.conf, resolv.conf, chroot mounts
+    - role: kernel       # configure + build kernel + dracut --no-hostonly  [port: kernelautomation.py]
+    - role: bootloader   # GRUB UEFI + efibootmgr; fstab by PARTUUID
+  # Roles run install steps inside the chroot at /mnt/gentoo.

@@ -1,0 +1,240 @@
+---
+# Role: luks — encrypt root partition in-place on metal (Phase 2).
+#
+# PREREQUISITES:
+#   - Booted on metal from the flashed raw image (NOT the QEMU oven)
+#   - Sufficient free space for rootfs tarball (or external backup media)
+#   - luks_passphrase set (prompted interactively or via vault)
+#   - /boot and ESP are NOT encrypted (GRUB unlocks LUKS for root only)
+#
+# FLOW:
+#   1. Backup rootfs to tarball on ESP or external media
+#   2. Unmount root, luksFormat, luksOpen
+#   3. mkfs + restore
+#   4. Update fstab, crypttab, dracut, GRUB
+#   5. Reboot into encrypted system
+#
+# WARNING: DESTRUCTIVE — wipes and re-creates the root partition contents.
+#          Run from a live USB/ISO, NOT from the running installed system.
+#          Ansible must target a LIVE ENVIRONMENT that has the target disk mounted.
+
+# ---- Pre-flight checks ----
+- name: "[P2] Assert LUKS passphrase is set"
+  ansible.builtin.assert:
+    that:
+      - luks_passphrase is defined
+      - luks_passphrase | length >= 8
+    fail_msg: "luks_passphrase must be set (>= 8 chars). Pass via -e or ansible-vault."
+
+- name: "[P2] Assert target disk is set"
+  ansible.builtin.assert:
+    that:
+      - luks_target_disk is defined
+    fail_msg: "luks_target_disk must be set (e.g. /dev/sda, /dev/nvme0n1)"
+
+- name: "[P2] Detect partition layout"
+  ansible.builtin.set_fact:
+    luks_esp_part: "{{ luks_target_disk }}{{ luks_part_separator }}1"
+    luks_root_part: "{{ luks_target_disk }}{{ luks_part_separator }}2"
+
+- name: "[P2] Verify target partitions exist"
+  ansible.builtin.stat:
+    path: "{{ item }}"
+  loop:
+    - "{{ luks_esp_part }}"
+    - "{{ luks_root_part }}"
+  register: _parts
+  failed_when: not _parts.results[0].stat.exists
+
+# ---- Phase 1: Backup rootfs ----
+- name: "[P2] Mount root partition (unencrypted) for backup"
+  ansible.builtin.command: "{{ item }}"
+  loop:
+    - "mkdir -p /mnt/gentoo"
+    - "mount {{ luks_root_part }} /mnt/gentoo"
+
+- name: "[P2] Mount ESP"
+  ansible.builtin.command: "{{ item }}"
+  loop:
+    - "mkdir -p /mnt/gentoo/boot/efi"
+    - "mount {{ luks_esp_part }} /mnt/gentoo/boot/efi"
+
+- name: "[P2] Backup rootfs to tarball"
+  ansible.builtin.shell: |
+    tar czf {{ luks_backup_path }}/rootfs-backup.tar.gz \
+      --exclude='./swapfile' \
+      --exclude='./var/tmp/portage/*' \
+      --exclude='./tmp/*' \
+      -C /mnt/gentoo .
+  args:
+    creates: "{{ luks_backup_path }}/rootfs-backup.tar.gz"
+  async: 7200
+  poll: 60
+
+- name: "[P2] Verify backup integrity"
+  ansible.builtin.command: "tar tzf {{ luks_backup_path }}/rootfs-backup.tar.gz > /dev/null"
+
+- name: "[P2] Copy kernel + initramfs to ESP for safety"
+  ansible.builtin.shell: |
+    cp /mnt/gentoo/boot/vmlinuz-* /mnt/gentoo/boot/efi/ 2>/dev/null || true
+    cp /mnt/gentoo/boot/initramfs-* /mnt/gentoo/boot/efi/ 2>/dev/null || true
+
+# ---- Phase 2: Encrypt ----
+- name: "[P2] Unmount root (keep ESP mounted)"
+  ansible.builtin.shell: |
+    umount /mnt/gentoo/boot/efi
+    umount /mnt/gentoo
+
+- name: "[P2] LUKS format root partition"
+  ansible.builtin.shell: |
+    echo -n "{{ luks_passphrase }}" | cryptsetup luksFormat \
+      --type luks2 \
+      --cipher aes-xts-plain64 \
+      --key-size 512 \
+      --hash sha512 \
+      --pbkdf argon2id \
+      --batch-mode \
+      {{ luks_root_part }}
+  no_log: true
+
+- name: "[P2] Open LUKS volume"
+  ansible.builtin.shell: |
+    echo -n "{{ luks_passphrase }}" | cryptsetup luksOpen \
+      {{ luks_root_part }} gentoo-root
+  no_log: true
+
+- name: "[P2] Format LUKS volume (ext4)"
+  ansible.builtin.command: "mkfs.ext4 -F /dev/mapper/gentoo-root"
+
+# ---- Phase 3: Restore ----
+- name: "[P2] Mount encrypted root + ESP"
+  ansible.builtin.command: "{{ item }}"
+  loop:
+    - "mount /dev/mapper/gentoo-root /mnt/gentoo"
+    - "mkdir -p /mnt/gentoo/boot/efi"
+    - "mount {{ luks_esp_part }} /mnt/gentoo/boot/efi"
+
+- name: "[P2] Restore rootfs from backup"
+  ansible.builtin.shell: |
+    tar xzf {{ luks_backup_path }}/rootfs-backup.tar.gz -C /mnt/gentoo
+  async: 7200
+  poll: 60
+
+# ---- Phase 4: Reconfigure boot chain for LUKS ----
+- name: "[P2] Capture LUKS UUID"
+  ansible.builtin.command: "cryptsetup luksUUID {{ luks_root_part }}"
+  register: _luks_uuid
+  changed_when: false
+
+- name: "[P2] Register LUKS UUID"
+  ansible.builtin.set_fact:
+    luks_uuid: "{{ _luks_uuid.stdout | trim }}"
+
+- name: "[P2] Show LUKS UUID"
+  ansible.builtin.debug:
+    msg: "LUKS UUID={{ luks_uuid }}"
+
+- name: "[P2] Write /etc/crypttab"
+  ansible.builtin.copy:
+    dest: /mnt/gentoo/etc/crypttab
+    mode: "0644"
+    content: |
+      # <name>       <device>                         <password>  <options>
+      gentoo-root    UUID={{ luks_uuid }}              none        luks,discard
+
+- name: "[P2] Update fstab — root points to /dev/mapper/gentoo-root"
+  ansible.builtin.copy:
+    dest: /mnt/gentoo/etc/fstab
+    mode: "0644"
+    content: |
+      # Managed by gentoo-build. LUKS-encrypted root (Phase 2).
+      /dev/mapper/gentoo-root  /          ext4  defaults,noatime,discard  0 1
+      PARTUUID={{ esp_partuuid | default('') }}  /boot/efi  vfat  defaults,noatime        0 2
+
+- name: "[P2] Capture ESP PARTUUID for fstab"
+  ansible.builtin.command: "blkid -s PARTUUID -o value {{ luks_esp_part }}"
+  register: _esp_partuuid
+  changed_when: false
+
+- name: "[P2] Re-render fstab with ESP PARTUUID"
+  ansible.builtin.copy:
+    dest: /mnt/gentoo/etc/fstab
+    mode: "0644"
+    content: |
+      # Managed by gentoo-build. LUKS-encrypted root (Phase 2).
+      /dev/mapper/gentoo-root                            /          ext4  defaults,noatime,discard  0 1
+      PARTUUID={{ _esp_partuuid.stdout | trim }}         /boot/efi  vfat  defaults,noatime          0 2
+      /swapfile                                          none       swap  sw                         0 0
+
+- name: "[P2] Configure dracut for LUKS unlock"
+  ansible.builtin.copy:
+    dest: /mnt/gentoo/etc/dracut.conf.d/10-luks.conf
+    mode: "0644"
+    content: |
+      # Unlock LUKS root at boot
+      add_dracutmodules+=" crypt dm "
+      install_items+=" /etc/crypttab "
+
+- name: "[P2] Update GRUB cmdline for LUKS root"
+  ansible.builtin.copy:
+    dest: /mnt/gentoo/etc/default/grub.d/luks.cfg
+    mode: "0644"
+    content: |
+      GRUB_CMDLINE_LINUX="rd.luks.uuid={{ luks_uuid }} root=/dev/mapper/gentoo-root security=tomoyo console=ttyS0,115200"
+      GRUB_ENABLE_CRYPTODISK=y
+
+- name: "[P2] Install GRUB cryptodisk support into ESP"
+  ansible.builtin.copy:
+    dest: /mnt/gentoo/etc/portage/package.use/grub-luks
+    mode: "0644"
+    content: "sys-boot/grub device-mapper\n"
+
+# ---- Phase 5: Chroot and regenerate ----
+- name: "[P2] Bind-mount pseudo-filesystems for chroot"
+  ansible.builtin.command: "{{ item }}"
+  loop:
+    - mount --types proc /proc /mnt/gentoo/proc
+    - mount --rbind /sys /mnt/gentoo/sys
+    - mount --make-rslave /mnt/gentoo/sys
+    - mount --rbind /dev /mnt/gentoo/dev
+    - mount --make-rslave /mnt/gentoo/dev
+    - mount --bind /run /mnt/gentoo/run
+    - mount --make-slave /mnt/gentoo/run
+
+- name: "[P2] Copy DNS for chroot network access"
+  ansible.builtin.copy:
+    src: /etc/resolv.conf
+    dest: /mnt/gentoo/etc/resolv.conf
+    remote_src: true
+    mode: "0644"
+
+- name: "[P2] Regenerate initramfs with crypt support"
+  ansible.builtin.command: >-
+    chroot /mnt/gentoo /bin/bash -lc
+    'dracut --force --kver $(ls /lib/modules/ | head -1)'
+  async: 1800
+  poll: 30
+
+- name: "[P2] Rebuild GRUB with cryptodisk module"
+  ansible.builtin.command: >-
+    chroot /mnt/gentoo /bin/bash -lc
+    'grub-install --target=x86_64-efi --efi-directory=/boot/efi --removable --modules="luks2 cryptodisk gcry_rijndael gcry_sha512 part_gpt"'
+
+- name: "[P2] Regenerate grub.cfg"
+  ansible.builtin.command: >-
+    chroot /mnt/gentoo /bin/bash -lc 'grub-mkconfig -o /boot/grub/grub.cfg'
+
+# ---- Cleanup ----
+- name: "[P2] Unmount chroot + encrypted root"
+  ansible.builtin.shell: |
+    umount -R /mnt/gentoo
+    cryptsetup luksClose gentoo-root
+  ignore_errors: true
+
+- name: "[P2] LUKS encryption complete"
+  ansible.builtin.debug:
+    msg: >-
+      Root partition {{ luks_root_part }} is now LUKS2-encrypted.
+      GRUB will prompt for passphrase at boot.
+      Backup tarball at {{ luks_backup_path }}/rootfs-backup.tar.gz.
+      Reboot into the encrypted system to verify.

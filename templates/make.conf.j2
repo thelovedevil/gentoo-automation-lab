@@ -1,0 +1,17 @@
+# Managed by gentoo-build (Ansible). Edit group_vars/all.yml, not this file.
+COMMON_FLAGS="{{ make_common_flags }}"
+CFLAGS="${COMMON_FLAGS}"
+CXXFLAGS="${COMMON_FLAGS}"
+FCFLAGS="${COMMON_FLAGS}"
+FFLAGS="${COMMON_FLAGS}"
+
+MAKEOPTS="{{ make_opts }}"
+USE="{{ make_use }}"
+
+ACCEPT_LICENSE="*"
+GRUB_PLATFORMS="{{ make_grub_platforms }}"
+{% if make_video_cards %}VIDEO_CARDS="{{ make_video_cards }}"
+{% endif %}
+# Portable build: x86-64-v3, NEVER -march=native (Phase-1 invariant).
+# Crypto libs still get AES-NI/AVX from -march=x86-64-v3.
+FEATURES="parallel-fetch"

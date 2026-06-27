@@ -1,0 +1,52 @@
+---
+# Stage A — bootloader only (kernel already installed).
+# Mounts existing partitions, captures PARTUUIDs, runs bootloader role.
+- name: "Stage A :: install bootloader"
+  hosts: installer
+  gather_facts: true
+  vars:
+    build_stage: a
+  tasks:
+    # ---- verify mounts still up ----
+    - name: Check root is mounted
+      ansible.builtin.command: mountpoint -q /mnt/gentoo
+      changed_when: false
+
+    - name: Check ESP is mounted
+      ansible.builtin.command: mountpoint -q /mnt/gentoo/boot/efi
+      changed_when: false
+
+    # ---- capture PARTUUIDs ----
+    - name: Capture PARTUUIDs
+      ansible.builtin.command: "blkid -s PARTUUID -o value {{ item }}"
+      loop:
+        - "{{ disk_dev }}1"
+        - "{{ disk_dev }}2"
+      register: _partuuids
+      changed_when: false
+
+    - name: Register PARTUUID facts
+      ansible.builtin.set_fact:
+        esp_partuuid: "{{ _partuuids.results[0].stdout | trim }}"
+        root_partuuid: "{{ _partuuids.results[1].stdout | trim }}"
+
+    - name: Show PARTUUIDs
+      ansible.builtin.debug:
+        msg: "ESP PARTUUID={{ esp_partuuid }}  root PARTUUID={{ root_partuuid }}"
+
+    # ---- verify kernel is in /boot ----
+    - name: Verify vmlinuz exists
+      ansible.builtin.shell: ls /mnt/gentoo/boot/vmlinuz-* | head -1
+      register: _vmlinuz
+      changed_when: false
+      failed_when: _vmlinuz.rc != 0
+
+    - name: Show kernel
+      ansible.builtin.debug:
+        msg: "Kernel: {{ _vmlinuz.stdout }}"
+
+  roles: []
+  post_tasks:
+    - name: Include bootloader role
+      ansible.builtin.include_role:
+        name: bootloader

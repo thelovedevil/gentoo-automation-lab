@@ -1,0 +1,69 @@
+---
+# Role: kernel — Gentoo DISTRIBUTION KERNEL (generic/portable) + TOMOYO + dracut.
+# NOTE: gentooinstall/kernelautomation.py was an EMPTY stub — nothing to port.
+#       Built here from our invariants + standard dist-kernel practice. Stage A (chroot).
+#
+# DESIGN CHOICE (flag for review): sys-kernel/{{ kernel_source }} = gentoo-kernel
+#   (distribution kernel). Its generic config already carries virtio + NVMe + AHCI
+#   + common NICs (the dual-boot driver invariant) and integrates with dracut for a
+#   generic initramfs — robust + automatable for a PORTABLE base. We merge a config
+#   fragment for TOMOYO + net knobs. ALTERNATIVE (your wheelhouse): manual
+#   gentoo-sources + hand .config — better fit for Phase-2 metal/RT tuning.
+
+- name: "[A] Create config directories in chroot"
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    mode: "0755"
+  loop:
+    - /mnt/gentoo/etc/dracut.conf.d
+    - /mnt/gentoo/etc/portage/package.use
+    - /mnt/gentoo/etc/kernel/config.d
+
+- name: "[A] Generic (NOT host-only) dracut config"
+  ansible.builtin.template:
+    src: dracut.conf.j2
+    dest: /mnt/gentoo/etc/dracut.conf.d/00-portable.conf
+    mode: "0644"
+
+- name: "[A] Enable dracut initramfs generation for installkernel"
+  ansible.builtin.copy:
+    dest: /mnt/gentoo/etc/portage/package.use/installkernel
+    mode: "0644"
+    content: "sys-kernel/installkernel dracut\n"
+
+- name: "[A] Kernel config fragment — TOMOYO + net knobs + force storage/net builtin"
+  ansible.builtin.copy:
+    dest: /mnt/gentoo/etc/kernel/config.d/99-portable.config
+    mode: "0644"
+    content: |
+      # gentoo-build portable fragment (merged into the dist-kernel config)
+      CONFIG_SECURITY=y
+      CONFIG_SECURITY_TOMOYO=y
+      # dual-boot driver invariant: built-in so it boots QEMU virtio AND bare metal
+      CONFIG_VIRTIO_BLK=y
+      CONFIG_SCSI_VIRTIO=y
+      CONFIG_VIRTIO_NET=y
+      CONFIG_VIRTIO_PCI=y
+      CONFIG_BLK_DEV_NVME=y
+      CONFIG_SATA_AHCI=y
+      # network knobs: policy routing / qdiscs / conntrack / netns
+      CONFIG_IP_ADVANCED_ROUTER=y
+      CONFIG_IP_MULTIPLE_TABLES=y
+      CONFIG_NET_SCHED=y
+      CONFIG_NF_CONNTRACK=y
+      CONFIG_NET_NS=y
+
+- name: "[A] Install dracut + installkernel"
+  ansible.builtin.command: "chroot /mnt/gentoo /bin/bash -lc 'emerge --noreplace sys-kernel/dracut sys-kernel/installkernel'"
+  changed_when: true
+  async: 1800
+  poll: 30
+
+- name: "[A] Build distribution kernel + generic initramfs ({{ kernel_source }})"
+  ansible.builtin.command: "chroot /mnt/gentoo /bin/bash -lc 'emerge sys-kernel/{{ kernel_source }}'"
+  changed_when: true
+  async: 7200
+  poll: 60
+  # Merges /etc/kernel/config.d/*.config; installkernel + dracut place vmlinuz and
+  # the hostonly=no initramfs in /boot. Bootloader role then runs grub-mkconfig.

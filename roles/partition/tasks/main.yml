@@ -1,0 +1,73 @@
+---
+# Role: partition — GPT (ESP + root), format, capture PARTUUIDs, mount /mnt/gentoo.
+#
+# Ported from gentooinstall/{fdiskluks.py, create_efi.py} (the curses installer):
+#   proven scheme = GPT · ESP vfat -F32 · optional GPG-keyed LUKS · mount /mnt/gentoo.
+# Automated here with sgdisk on the known VM disk {{ disk_dev }} (no interactive UI).
+#
+# WARNING: DESTRUCTIVE and non-idempotent — wipes {{ disk_dev }} (the fresh qcow2).
+#          By design: the build oven always starts from a clean image.
+
+- name: Assert target disk is configured
+  ansible.builtin.assert:
+    that:
+      - disk_dev is defined
+      - disk_dev | length > 0
+    fail_msg: "disk_dev must be set in group_vars/all.yml"
+
+- name: Fail clearly if LUKS requested (not yet ported)
+  ansible.builtin.fail:
+    msg: >-
+      luks_enabled=true is not implemented for the portable image
+      (Phase-1 invariant: off). Port from gentooinstall/fdiskluks.py
+      when enabling encryption on the Phase-2 metal deployment.
+  when: luks_enabled | bool
+
+- name: Unmount any prior mounts on target disk
+  ansible.builtin.shell: |
+    umount -R /mnt/gentoo 2>/dev/null || true
+  changed_when: false
+
+- name: Wipe and lay down GPT (ESP + root)
+  ansible.builtin.command: "{{ item }}"
+  loop:
+    - "sgdisk --zap-all {{ disk_dev }}"
+    - "sgdisk -n 1:0:+{{ esp_size }} -t 1:ef00 -c 1:ESP {{ disk_dev }}"
+    - "sgdisk -n 2:0:0     -t 2:8300 -c 2:root {{ disk_dev }}"
+
+- name: Re-read partition table and settle
+  ansible.builtin.command: "{{ item }}"
+  loop:
+    - "partprobe {{ disk_dev }}"
+    - "udevadm settle"
+  changed_when: false
+
+- name: Format ESP (vfat) and root ({{ root_fs }})
+  ansible.builtin.command: "{{ item }}"
+  loop:
+    - "mkfs.vfat -F32 {{ disk_dev }}1"
+    - "mkfs.{{ root_fs }} -F {{ disk_dev }}2"     # ext4: -F ; xfs would use -f
+
+- name: Capture PARTUUIDs  (INVARIANT — fstab/bootloader key on these, NOT {{ disk_dev }}X)
+  ansible.builtin.command: "blkid -s PARTUUID -o value {{ item }}"
+  loop:
+    - "{{ disk_dev }}1"
+    - "{{ disk_dev }}2"
+  register: _partuuids
+  changed_when: false
+
+- name: Register PARTUUID facts for fstab.j2 / bootloader
+  ansible.builtin.set_fact:
+    esp_partuuid: "{{ _partuuids.results[0].stdout | trim }}"
+    root_partuuid: "{{ _partuuids.results[1].stdout | trim }}"
+
+- name: Show captured PARTUUIDs
+  ansible.builtin.debug:
+    msg: "ESP PARTUUID={{ esp_partuuid }}  root PARTUUID={{ root_partuuid }}"
+
+- name: Mount root, then ESP, under /mnt/gentoo
+  ansible.builtin.command: "{{ item }}"
+  loop:
+    - "mount {{ disk_dev }}2 /mnt/gentoo"
+    - "mkdir -p /mnt/gentoo/boot/efi"
+    - "mount {{ disk_dev }}1 /mnt/gentoo/boot/efi"

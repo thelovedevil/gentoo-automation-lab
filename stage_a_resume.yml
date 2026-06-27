@@ -1,0 +1,73 @@
+---
+# Stage A RESUME — skip partition/stage3/portage (already baked into qcow2).
+# Mounts existing partitions, bind-mounts pseudofs, then runs kernel + bootloader.
+- name: "Stage A :: resume from kernel build"
+  hosts: installer
+  gather_facts: true
+  vars:
+    build_stage: a
+  tasks:
+    # ---- re-mount the existing partitions (no wipe) ----
+    - name: Mount root partition
+      ansible.builtin.shell: |
+        mkdir -p /mnt/gentoo
+        mount {{ disk_dev }}2 /mnt/gentoo
+
+    - name: Mount ESP
+      ansible.builtin.shell: |
+        mkdir -p /mnt/gentoo/boot/efi
+        mount {{ disk_dev }}1 /mnt/gentoo/boot/efi
+
+    - name: Verify stage3 is present
+      ansible.builtin.stat:
+        path: /mnt/gentoo/usr/share/portage/config/repos.conf
+      register: _stage3_check
+      failed_when: not _stage3_check.stat.exists
+
+    # ---- bind-mount pseudofs (from portage role) ----
+    - name: Bind-mount pseudo-filesystems for chroot
+      ansible.builtin.command: "{{ item }}"
+      loop:
+        - mount --types proc /proc /mnt/gentoo/proc
+        - mount --rbind /sys /mnt/gentoo/sys
+        - mount --make-rslave /mnt/gentoo/sys
+        - mount --rbind /dev /mnt/gentoo/dev
+        - mount --make-rslave /mnt/gentoo/dev
+        - mount --bind /run /mnt/gentoo/run
+        - mount --make-slave /mnt/gentoo/run
+
+    - name: Copy DNS into the new root
+      ansible.builtin.copy:
+        src: /etc/resolv.conf
+        dest: /mnt/gentoo/etc/resolv.conf
+        remote_src: true
+        mode: "0644"
+
+    # ---- capture PARTUUIDs (needed by kernel/bootloader roles) ----
+    - name: Capture PARTUUIDs
+      ansible.builtin.command: "blkid -s PARTUUID -o value {{ item }}"
+      loop:
+        - "{{ disk_dev }}1"
+        - "{{ disk_dev }}2"
+      register: _partuuids
+      changed_when: false
+
+    - name: Register PARTUUID facts
+      ansible.builtin.set_fact:
+        esp_partuuid: "{{ _partuuids.results[0].stdout | trim }}"
+        root_partuuid: "{{ _partuuids.results[1].stdout | trim }}"
+
+    - name: Show PARTUUIDs
+      ansible.builtin.debug:
+        msg: "ESP PARTUUID={{ esp_partuuid }}  root PARTUUID={{ root_partuuid }}"
+
+  # ---- now run kernel + bootloader roles ----
+  roles: []
+  post_tasks:
+    - name: Include kernel role
+      ansible.builtin.include_role:
+        name: kernel
+
+    - name: Include bootloader role
+      ansible.builtin.include_role:
+        name: bootloader

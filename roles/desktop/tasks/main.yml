@@ -1,0 +1,41 @@
+---
+# Role: desktop — bspwm + sxhkd + sakura + picom + polybar + Xorg (modesetting).
+# Stage B. GPU driver = Phase 2 (nvidia); modesetting is the generic fallback.
+# make.conf and user creation handled in playbook pre_tasks.
+
+- name: "[B] Install Xorg + desktop packages"
+  ansible.builtin.command: >-
+    emerge --noreplace {{ desktop_packages | join(' ') }}
+  changed_when: true
+  async: 14400
+  poll: 60
+
+- name: "[B] Create XDG config directories"
+  ansible.builtin.file:
+    path: "{{ operator_home }}/.config/{{ item }}"
+    state: directory
+    owner: "{{ operator_user }}"
+    group: "{{ operator_user }}"
+    mode: "0755"
+  loop:
+    - bspwm
+    - sxhkd
+    - picom
+    - polybar
+
+- name: "[B] Ensure .xinitrc starts bspwm"
+  ansible.builtin.copy:
+    dest: "{{ operator_home }}/.xinitrc"
+    owner: "{{ operator_user }}"
+    group: "{{ operator_user }}"
+    mode: "0755"
+    content: |
+      #!/bin/sh
+      # Compositing
+      picom --daemon &
+      # Status bar
+      polybar &
+      # Hotkey daemon
+      sxhkd &
+      # Window manager
+      exec bspwm

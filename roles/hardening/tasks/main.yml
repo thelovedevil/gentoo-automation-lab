@@ -1,0 +1,54 @@
+---
+# Role: hardening — TOMOYO MAC (learning mode) + sshd lockdown. Stage B (guest).
+#
+# HONEST FLAGS (you're the TOMOYO expert — confirm these on first run):
+#  - the exact package atom (app-admin/tomoyo-tools) and tomoyo-init path/flow
+#    may need adjusting; TOMOYO setup on Gentoo is non-trivial.
+#  - full keys-only sshd lockdown only happens if operator_pubkey is set — without
+#    it we KEEP password auth so you don't lock yourself out of the base image.
+
+# ---- TOMOYO MAC ----
+- name: "[B] Install TOMOYO userspace tools"
+  ansible.builtin.command: "emerge --noreplace sys-apps/tomoyo-tools"
+  changed_when: true
+  # CONFIRM atom on first run.
+
+- name: "[B] Enable {{ kernel_lsm }} on the kernel cmdline"
+  ansible.builtin.lineinfile:
+    path: /etc/default/grub
+    regexp: '^#?GRUB_CMDLINE_LINUX='
+    line: 'GRUB_CMDLINE_LINUX="security={{ kernel_lsm }}"'
+    create: true
+
+- name: "[B] Regenerate grub.cfg with the LSM cmdline"
+  ansible.builtin.command: "grub-mkconfig -o /boot/grub/grub.cfg"
+  changed_when: true
+
+- name: "[B] Initialize TOMOYO policy in learning mode"
+  ansible.builtin.command: "/usr/sbin/tomoyo-init"
+  args:
+    creates: /etc/tomoyo/policy
+  ignore_errors: true
+  # learning mode auto-generates domain policy from observed behavior; tighten later.
+
+# ---- sshd hardening (lineinfile on main config — no Include dependency) ----
+- name: "[B] Inject operator SSH key (enables full keys-only lockdown)"
+  ansible.builtin.authorized_key:
+    user: root
+    key: "{{ operator_pubkey }}"
+  when: operator_pubkey | default('') | length > 0
+
+- name: "[B] Harden sshd"
+  ansible.builtin.lineinfile:
+    path: /etc/ssh/sshd_config
+    regexp: "{{ item.re }}"
+    line: "{{ item.line }}"
+  loop:
+    - { re: '^#?PermitRootLogin',        line: 'PermitRootLogin prohibit-password' }
+    - { re: '^#?PasswordAuthentication',  line: "PasswordAuthentication {{ 'no' if (operator_pubkey | default('') | length > 0) else 'yes' }}" }
+    - { re: '^#?X11Forwarding',           line: 'X11Forwarding no' }
+    - { re: '^#?MaxAuthTries',            line: 'MaxAuthTries 3' }
+
+- name: "[B] Restart sshd"
+  ansible.builtin.command: "rc-service sshd restart"
+  changed_when: true
