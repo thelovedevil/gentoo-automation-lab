@@ -1,0 +1,706 @@
+---
+# Phase 1.5 — final hardening + polish before metal flash.
+# Run in QEMU after Stage B, before flashing to physical disk.
+# Everything here is portable (no hardware-specific config).
+
+- name: "Phase 1.5 :: pre-flash hardening + polish"
+  hosts: gentoo_guest
+  gather_facts: true
+  vars:
+    build_stage: b
+    operator_user: operator
+    operator_home: /home/operator
+
+  tasks:
+    # ================================================================
+    # 1. LIBREWOLF (privacy-hardened Firefox fork)
+    # ================================================================
+    - name: "[1.5] Install eselect-repository for overlay management"
+      ansible.builtin.command: emerge --noreplace app-eselect/eselect-repository
+      changed_when: true
+
+    - name: "[1.5] Enable librewolf overlay"
+      ansible.builtin.command: eselect repository enable librewolf
+      changed_when: true
+      ignore_errors: true
+
+    - name: "[1.5] Sync librewolf overlay"
+      ansible.builtin.command: emaint sync -r librewolf
+      changed_when: true
+      ignore_errors: true
+
+    - name: "[1.5] Accept librewolf keywords"
+      ansible.builtin.copy:
+        dest: /etc/portage/package.accept_keywords/librewolf
+        mode: "0644"
+        content: "www-client/librewolf ~amd64\n"
+
+    - name: "[1.5] Install LibreWolf (binary)"
+      ansible.builtin.shell: >-
+        ACCEPT_KEYWORDS="~amd64" emerge --noreplace www-client/librewolf-bin ||
+        ACCEPT_KEYWORDS="~amd64" emerge --noreplace www-client/librewolf
+      changed_when: true
+      async: 7200
+      poll: 60
+      ignore_errors: true
+
+    # ================================================================
+    # 2. DESKTOP THEMING (bspwm + picom + polybar + wallpaper)
+    # ================================================================
+    - name: "[1.5] Install theme dependencies"
+      ansible.builtin.command: >-
+        emerge --noreplace media-gfx/feh x11-misc/xclip x11-apps/xset
+        media-gfx/imagemagick x11-misc/dunst media-gfx/scrot
+      changed_when: true
+      async: 3600
+      poll: 30
+
+    - name: "[1.5] Create wallpaper directory"
+      ansible.builtin.file:
+        path: "{{ operator_home }}/.local/share/wallpapers"
+        state: directory
+        owner: "{{ operator_user }}"
+        group: "{{ operator_user }}"
+        mode: "0755"
+
+    - name: "[1.5] Deploy wallpaper"
+      ansible.builtin.copy:
+        src: /home/operator/projects/gentoo-build/showmeyourpowerjapanese.jpg
+        dest: "{{ operator_home }}/.local/share/wallpapers/wall.jpg"
+        owner: "{{ operator_user }}"
+        group: "{{ operator_user }}"
+        mode: "0644"
+
+    - name: "[1.5] Deploy bspwmrc"
+      ansible.builtin.copy:
+        dest: "{{ operator_home }}/.config/bspwm/bspwmrc"
+        owner: "{{ operator_user }}"
+        group: "{{ operator_user }}"
+        mode: "0755"
+        content: |
+          #!/bin/sh
+          # ---- monitors ----
+          bspc monitor -d I II III IV V VI VII VIII IX X
+
+          # ---- global settings ----
+          bspc config border_width          2
+          bspc config window_gap            8
+          bspc config split_ratio           0.52
+          bspc config borderless_monocle    true
+          bspc config gapless_monocle       true
+          bspc config focus_follows_pointer true
+
+          # ---- colors (laintheme: dark with red accents) ----
+          bspc config normal_border_color   "#282828"
+          bspc config active_border_color   "#282828"
+          bspc config focused_border_color  "#c25e5e"
+          bspc config presel_feedback_color "#dc7171"
+
+          # ---- rules ----
+          bspc rule -a LibreWolf desktop='^2'
+          bspc rule -a Emacs desktop='^3' state=tiled
+
+          # ---- autostart ----
+          pgrep -x sxhkd > /dev/null || sxhkd &
+          pgrep -x picom > /dev/null || picom --daemon &
+          pgrep -x polybar > /dev/null || polybar main &
+          pgrep -x dunst > /dev/null || dunst &
+
+          # wallpaper (centered on black background)
+          [ -f ~/.local/share/wallpapers/wall.jpg ] && feh --bg-center --image-bg '#000000' ~/.local/share/wallpapers/wall.jpg &
+
+    - name: "[1.5] Deploy sxhkdrc"
+      ansible.builtin.copy:
+        dest: "{{ operator_home }}/.config/sxhkd/sxhkdrc"
+        owner: "{{ operator_user }}"
+        group: "{{ operator_user }}"
+        mode: "0644"
+        content: |
+          # ---- wm independent ----
+          # terminal
+          super + Return
+          	sakura
+
+          # launcher
+          super + d
+          	dmenu_run -nb '#000000' -nf '#d0d0d0' -sb '#c25e5e' -sf '#000000'
+
+          # browser
+          super + b
+          	librewolf
+
+          # emacs
+          super + e
+          	emacs
+
+          # reload sxhkd
+          super + Escape
+          	pkill -USR1 -x sxhkd
+
+          # ---- bspwm hotkeys ----
+          # quit/restart bspwm
+          super + alt + {q,r}
+          	bspc {quit,wm -r}
+
+          # close/kill node
+          super + {_,shift + }w
+          	bspc node -{c,k}
+
+          # focus/swap node in direction
+          super + {_,shift + }{h,j,k,l}
+          	bspc node -{f,s} {west,south,north,east}
+
+          # focus desktop
+          super + {1-9,0}
+          	bspc desktop -f '^{1-9,10}'
+
+          # send to desktop
+          super + shift + {1-9,0}
+          	bspc node -d '^{1-9,10}'
+
+          # toggle floating/fullscreen
+          super + {s,f}
+          	bspc node -t {floating,fullscreen}
+
+          # toggle tiled
+          super + t
+          	bspc node -t tiled
+
+          # screenshot (requires scrot)
+          Print
+          	scrot '%Y-%m-%d_%H-%M-%S.png' -e 'mv $f ~/screenshots/'
+
+    - name: "[1.5] Deploy picom.conf (transparency + shadows)"
+      ansible.builtin.copy:
+        dest: "{{ operator_home }}/.config/picom/picom.conf"
+        owner: "{{ operator_user }}"
+        group: "{{ operator_user }}"
+        mode: "0644"
+        content: |
+          # backend
+          backend = "glx";
+
+          # opacity
+          active-opacity = 0.92;
+          inactive-opacity = 0.85;
+          frame-opacity = 0.9;
+
+          opacity-rule = [
+            "100:class_g = 'LibreWolf'",
+            "95:class_g = 'Emacs'",
+            "90:class_g = 'sakura'"
+          ];
+
+          # fade
+          fading = true;
+          fade-delta = 4;
+          fade-in-step = 0.03;
+          fade-out-step = 0.03;
+
+          # shadow
+          shadow = true;
+          shadow-radius = 12;
+          shadow-offset-x = -7;
+          shadow-offset-y = -7;
+          shadow-opacity = 0.6;
+          shadow-color = "#000000";
+          shadow-exclude = [
+            "name = 'Notification'",
+            "class_g = 'Polybar'"
+          ];
+
+          # corners
+          corner-radius = 6;
+
+          # blur
+          blur-method = "dual_kawase";
+          blur-strength = 3;
+          blur-background-exclude = [
+            "window_type = 'dock'"
+          ];
+
+          # vsync
+          vsync = true;
+
+    - name: "[1.5] Deploy polybar config (laintheme colors)"
+      ansible.builtin.copy:
+        dest: "{{ operator_home }}/.config/polybar/config.ini"
+        owner: "{{ operator_user }}"
+        group: "{{ operator_user }}"
+        mode: "0644"
+        content: |
+          [colors]
+          background = #000000
+          background-alt = #282828
+          foreground = #d0d0d0
+          primary = #c25e5e
+          secondary = #dc7171
+          alert = #ff8a8a
+          disabled = #707070
+
+          [bar/main]
+          width = 100%
+          height = 24pt
+          radius = 0
+          background = ${colors.background}
+          foreground = ${colors.foreground}
+          line-size = 2pt
+          border-bottom-size = 1pt
+          border-bottom-color = ${colors.background-alt}
+          padding-left = 1
+          padding-right = 1
+          module-margin = 1
+          separator = |
+          separator-foreground = ${colors.disabled}
+          font-0 = "DejaVu Sans Mono:size=10;2"
+          font-1 = "Noto Sans:size=10;2"
+          modules-left = bspwm
+          modules-center = date
+          modules-right = memory cpu network
+
+          [module/bspwm]
+          type = internal/bspwm
+          label-focused = %name%
+          label-focused-background = ${colors.background-alt}
+          label-focused-underline = ${colors.primary}
+          label-focused-padding = 1
+          label-occupied = %name%
+          label-occupied-padding = 1
+          label-urgent = %name%
+          label-urgent-background = ${colors.alert}
+          label-urgent-padding = 1
+          label-empty = %name%
+          label-empty-foreground = ${colors.disabled}
+          label-empty-padding = 1
+
+          [module/cpu]
+          type = internal/cpu
+          interval = 2
+          format-prefix = "CPU "
+          format-prefix-foreground = ${colors.primary}
+          label = %percentage:2%%
+
+          [module/memory]
+          type = internal/memory
+          interval = 2
+          format-prefix = "MEM "
+          format-prefix-foreground = ${colors.primary}
+          label = %percentage_used:2%%
+
+          [module/network]
+          type = internal/network
+          interface-type = wired
+          interval = 5
+          format-connected = <label-connected>
+          label-connected = %ifname% %local_ip%
+          label-connected-foreground = ${colors.primary}
+          label-disconnected = disconnected
+          label-disconnected-foreground = ${colors.disabled}
+
+          [module/date]
+          type = internal/date
+          interval = 1
+          date = %Y-%m-%d %H:%M:%S
+          label = %date%
+          label-foreground = ${colors.foreground}
+
+          [settings]
+          screenchange-reload = true
+
+    - name: "[1.5] Deploy Xresources (terminal colors)"
+      ansible.builtin.copy:
+        dest: "{{ operator_home }}/.Xresources"
+        owner: "{{ operator_user }}"
+        group: "{{ operator_user }}"
+        mode: "0644"
+        content: |
+          ! laintheme terminal palette
+          *background: #000000
+          *foreground: #d0d0d0
+          *cursorColor: #828282
+          ! black
+          *color0: #000000
+          *color8: #282828
+          ! red
+          *color1: #c25e5e
+          *color9: #ff8c8c
+          ! green
+          *color2: #7a9f60
+          *color10: #a0cf80
+          ! yellow
+          *color3: #d3869b
+          *color11: #f7b4c9
+          ! blue
+          *color4: #5f819d
+          *color12: #83a5c2
+          ! magenta
+          *color5: #dc7171
+          *color13: #ff8a8a
+          ! cyan
+          *color6: #6ca0a0
+          *color14: #8fc8c8
+          ! white
+          *color7: #d0d0d0
+          *color15: #f7f3f3
+
+    - name: "[1.5] Create screenshots directory"
+      ansible.builtin.file:
+        path: "{{ operator_home }}/screenshots"
+        state: directory
+        owner: "{{ operator_user }}"
+        group: "{{ operator_user }}"
+        mode: "0755"
+
+    # ================================================================
+    # 3. KERNEL-LEVEL SECURITY HARDENING (sysctl + boot params)
+    # ================================================================
+    - name: "[1.5] Deploy hardened sysctl.conf"
+      ansible.builtin.copy:
+        dest: /etc/sysctl.d/99-hardening.conf
+        mode: "0644"
+        content: |
+          # --- network hardening ---
+          net.ipv4.conf.all.rp_filter = 1
+          net.ipv4.conf.default.rp_filter = 1
+          net.ipv4.conf.all.accept_redirects = 0
+          net.ipv4.conf.default.accept_redirects = 0
+          net.ipv4.conf.all.send_redirects = 0
+          net.ipv4.conf.default.send_redirects = 0
+          net.ipv4.conf.all.accept_source_route = 0
+          net.ipv4.conf.default.accept_source_route = 0
+          net.ipv4.conf.all.log_martians = 1
+          net.ipv4.icmp_echo_ignore_broadcasts = 1
+          net.ipv4.icmp_ignore_bogus_error_responses = 1
+          net.ipv4.tcp_syncookies = 1
+          net.ipv4.tcp_timestamps = 0
+          net.ipv6.conf.all.accept_redirects = 0
+          net.ipv6.conf.default.accept_redirects = 0
+
+          # --- kernel hardening ---
+          kernel.kptr_restrict = 2
+          kernel.dmesg_restrict = 1
+          kernel.perf_event_paranoid = 3
+          kernel.yama.ptrace_scope = 2
+          kernel.unprivileged_bpf_disabled = 1
+          net.core.bpf_jit_harden = 2
+
+          # --- filesystem hardening ---
+          fs.protected_hardlinks = 1
+          fs.protected_symlinks = 1
+          fs.protected_fifos = 2
+          fs.protected_regular = 2
+          fs.suid_dumpable = 0
+
+    - name: "[1.5] Deploy hardened GRUB cmdline"
+      ansible.builtin.copy:
+        dest: /etc/default/grub.d/hardening.cfg
+        mode: "0644"
+        content: |
+          # Kernel hardening boot parameters
+          GRUB_CMDLINE_LINUX="${GRUB_CMDLINE_LINUX} init_on_alloc=1 init_on_free=1 slab_nomerge page_alloc.shuffle=1 randomize_kstack_offset=on vsyscall=none"
+
+    # ================================================================
+    # 4. FIREWALL (nftables baseline)
+    # ================================================================
+    - name: "[1.5] Install nftables"
+      ansible.builtin.command: emerge --noreplace net-firewall/nftables
+      changed_when: true
+      async: 1800
+      poll: 30
+
+    - name: "[1.5] Deploy baseline nftables ruleset"
+      ansible.builtin.copy:
+        dest: /etc/nftables.conf
+        mode: "0644"
+        content: |
+          #!/usr/sbin/nft -f
+          flush ruleset
+
+          table inet filter {
+            chain input {
+              type filter hook input priority 0; policy drop;
+
+              # loopback
+              iif lo accept
+
+              # established/related
+              ct state established,related accept
+
+              # ICMP (rate-limited)
+              ip protocol icmp limit rate 4/second accept
+              ip6 nexthdr icmpv6 limit rate 4/second accept
+
+              # SSH (rate-limited)
+              tcp dport 22 ct state new limit rate 3/minute accept
+
+              # drop invalid
+              ct state invalid drop
+
+              # log + drop everything else
+              log prefix "[nftables-drop] " limit rate 5/minute
+              drop
+            }
+
+            chain forward {
+              type filter hook forward priority 0; policy drop;
+            }
+
+            chain output {
+              type filter hook output priority 0; policy accept;
+            }
+          }
+
+    - name: "[1.5] Enable nftables at boot"
+      ansible.builtin.command: rc-update add nftables default
+      changed_when: true
+      ignore_errors: true
+
+    # ================================================================
+    # 5. DNS PRIVACY (DNS-over-TLS via stubby)
+    # ================================================================
+    - name: "[1.5] Install DNS-over-TLS resolver"
+      ansible.builtin.shell: >-
+        ACCEPT_KEYWORDS="~amd64" emerge --noreplace net-dns/stubby || true
+      changed_when: true
+      async: 1800
+      poll: 30
+
+    - name: "[1.5] Configure resolv.conf for local resolver"
+      ansible.builtin.copy:
+        dest: /etc/resolv.conf.head
+        mode: "0644"
+        content: |
+          # DNS-over-TLS via stubby (localhost)
+          nameserver 127.0.0.1
+
+    # ================================================================
+    # 6. ADDITIONAL SECURITY TOOLS
+    # ================================================================
+    - name: "[1.5] Install security utilities"
+      ansible.builtin.shell: >-
+        ACCEPT_KEYWORDS="~amd64" emerge --noreplace
+        app-forensics/lynis
+        sys-apps/firejail
+        app-crypt/gnupg
+        net-misc/openssh
+        app-admin/doas
+      changed_when: true
+      async: 3600
+      poll: 30
+      ignore_errors: true
+
+    - name: "[1.5] Configure doas (minimal sudo alternative)"
+      ansible.builtin.copy:
+        dest: /etc/doas.conf
+        mode: "0600"
+        content: |
+          # Allow wheel group with password
+          permit persist :wheel
+
+    # ================================================================
+    # 7. SHELL ENVIRONMENT
+    # ================================================================
+    - name: "[1.5] Deploy operator .bashrc"
+      ansible.builtin.copy:
+        dest: "{{ operator_home }}/.bashrc"
+        owner: "{{ operator_user }}"
+        group: "{{ operator_user }}"
+        mode: "0644"
+        content: |
+          # ---- prompt (red accent, laintheme) ----
+          PS1='\[\033[0;31m\]\u\[\033[0m\]@\[\033[0;37m\]\h\[\033[0m\] \[\033[0;31m\]\w\[\033[0m\] \$ '
+
+          # ---- paths ----
+          export GOPATH="$HOME/go"
+          export PATH="$HOME/go/bin:$HOME/.cargo/bin:$HOME/.local/bin:$PATH"
+
+          # ---- aliases ----
+          alias ls='ls --color=auto'
+          alias ll='ls -lah'
+          alias grep='grep --color=auto'
+          alias gs='git status'
+          alias gd='git diff'
+          alias gl='git log --oneline -20'
+
+          # ---- security tool shortcuts ----
+          alias nse='ls /usr/share/nmap/scripts/ | grep'
+          alias seclists='ls /opt/seclists/'
+          alias venv-llm='source /opt/llm-orchestration-venv/bin/activate'
+          alias venv-offsec='source ~/.local/offensive-venv/bin/activate'
+
+          # ---- editor ----
+          export EDITOR=emacs
+          export VISUAL=emacs
+
+          # ---- history hardening ----
+          export HISTCONTROL=ignoreboth:erasedups
+          export HISTSIZE=10000
+          export HISTFILESIZE=20000
+          export HISTTIMEFORMAT="%Y-%m-%d %H:%M:%S  "
+          shopt -s histappend
+
+          # ---- bash completion ----
+          [ -f /etc/bash/bashrc.d/bash_completion.sh ] && . /etc/bash/bashrc.d/bash_completion.sh
+
+    # ================================================================
+    # 8. GTK DARK THEME (for librewolf + any GTK apps)
+    # ================================================================
+    - name: "[1.5] Create GTK config directory"
+      ansible.builtin.file:
+        path: "{{ operator_home }}/.config/gtk-3.0"
+        state: directory
+        owner: "{{ operator_user }}"
+        group: "{{ operator_user }}"
+        mode: "0755"
+
+    - name: "[1.5] Deploy GTK3 dark theme settings"
+      ansible.builtin.copy:
+        dest: "{{ operator_home }}/.config/gtk-3.0/settings.ini"
+        owner: "{{ operator_user }}"
+        group: "{{ operator_user }}"
+        mode: "0644"
+        content: |
+          [Settings]
+          gtk-theme-name=Adwaita-dark
+          gtk-icon-theme-name=Adwaita
+          gtk-cursor-theme-name=Adwaita
+          gtk-font-name=DejaVu Sans 10
+          gtk-application-prefer-dark-theme=true
+
+    - name: "[1.5] Deploy GTK2 dark theme"
+      ansible.builtin.copy:
+        dest: "{{ operator_home }}/.gtkrc-2.0"
+        owner: "{{ operator_user }}"
+        group: "{{ operator_user }}"
+        mode: "0644"
+        content: |
+          gtk-theme-name="Adwaita-dark"
+          gtk-icon-theme-name="Adwaita"
+          gtk-font-name="DejaVu Sans 10"
+
+    # ================================================================
+    # 9. NETWORKING PREP (FreeBSD/pfSense integration)
+    # ================================================================
+    - name: "[1.5] Install Ansible on the Gentoo image (control node)"
+      ansible.builtin.shell: >-
+        ACCEPT_KEYWORDS="~amd64" emerge --noreplace app-admin/ansible
+      changed_when: true
+      async: 3600
+      poll: 30
+      ignore_errors: true
+
+    - name: "[1.5] Create Ansible directory structure for pfsense-harden"
+      ansible.builtin.file:
+        path: "{{ operator_home }}/ansible/{{ item }}"
+        state: directory
+        owner: "{{ operator_user }}"
+        group: "{{ operator_user }}"
+        mode: "0755"
+      loop:
+        - inventory
+        - group_vars
+        - roles
+
+    - name: "[1.5] Deploy SSH config for FreeBSD target"
+      ansible.builtin.blockinfile:
+        path: "{{ operator_home }}/.ssh/config"
+        create: true
+        owner: "{{ operator_user }}"
+        group: "{{ operator_user }}"
+        mode: "0600"
+        marker: "# {mark} MANAGED BY gentoo-build/phase1_5"
+        block: |
+          Host pfsense
+            HostName 192.168.1.1
+            User admin
+            StrictHostKeyChecking no
+            IdentityFile ~/.ssh/id_ed25519
+
+          Host freebsd-jails
+            HostName 192.168.1.2
+            User root
+            StrictHostKeyChecking no
+            IdentityFile ~/.ssh/id_ed25519
+
+    - name: "[1.5] Generate SSH keypair for operator (if absent)"
+      ansible.builtin.command: >-
+        su - {{ operator_user }} -c
+        'test -f ~/.ssh/id_ed25519 || ssh-keygen -t ed25519 -f ~/.ssh/id_ed25519 -N ""'
+      changed_when: true
+
+    # ================================================================
+    # 10. LLM OPTIMIZATION PREP
+    # ================================================================
+    - name: "[1.5] Install Ollama service manager script"
+      ansible.builtin.copy:
+        dest: /etc/init.d/ollama
+        mode: "0755"
+        content: |
+          #!/sbin/openrc-run
+          name="ollama"
+          description="Ollama LLM inference server"
+          command="/usr/local/bin/ollama"
+          command_args="serve"
+          command_background=true
+          pidfile="/run/${RC_SVCNAME}.pid"
+          start_stop_daemon_args="--user {{ operator_user }}"
+
+          depend() {
+              need net
+              after firewall
+          }
+
+    - name: "[1.5] Deploy LLM environment config"
+      ansible.builtin.blockinfile:
+        path: "{{ operator_home }}/.bash_profile"
+        create: true
+        owner: "{{ operator_user }}"
+        group: "{{ operator_user }}"
+        mode: "0644"
+        marker: "# {mark} MANAGED BY gentoo-build/phase1_5-llm"
+        block: |
+          # Ollama config
+          export OLLAMA_HOST="127.0.0.1:11434"
+          export OLLAMA_MODELS="{{ operator_home }}/.ollama/models"
+
+          # Anthropic (set your key)
+          # export ANTHROPIC_API_KEY="sk-ant-..."
+
+          # Local inference defaults
+          export LLAMA_CPP_N_GPU_LAYERS=0   # Phase 1: CPU-only; Phase 2: set to 99 for full GPU offload
+
+    # ================================================================
+    # 11. FINAL: REGENERATE GRUB + SET HOSTNAME
+    # ================================================================
+    - name: "[1.5] Set hostname"
+      ansible.builtin.copy:
+        dest: /etc/conf.d/hostname
+        mode: "0644"
+        content: 'hostname="gentoo"\n'
+
+    - name: "[1.5] Set /etc/hostname"
+      ansible.builtin.copy:
+        dest: /etc/hostname
+        mode: "0644"
+        content: "gentoo\n"
+
+    - name: "[1.5] Regenerate GRUB config (includes all cmdline additions)"
+      ansible.builtin.command: grub-mkconfig -o /boot/grub/grub.cfg
+      changed_when: true
+
+    - name: "[1.5] Rebuild initramfs (picks up firmware + any new modules)"
+      ansible.builtin.shell: dracut --force --kver $(ls /lib/modules/ | head -1)
+      changed_when: true
+      async: 600
+      poll: 15
+
+    - name: "[1.5] Phase 1.5 complete"
+      ansible.builtin.debug:
+        msg: >-
+          Image is hardened and polished. Ready for metal flash.
+          Desktop: bspwm + picom (translucency) + polybar + laintheme colors.
+          Security: nftables firewall + hardened sysctl + GRUB cmdline hardening + firejail + doas.
+          Network: DNS-over-TLS prep + SSH config for FreeBSD targets + Ansible control node.
+          LLM: Ollama init script + env vars prepped.
+          Browser: LibreWolf.
+          Shutdown and flash to disk.

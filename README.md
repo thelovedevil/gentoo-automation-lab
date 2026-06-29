@@ -77,11 +77,27 @@ These constraints ensure one image boots both the QEMU oven and any target hardw
 | `dotfiles` | Emacs literate config (Org-mode), custom theme, tool configs (recon scanner profiles) |
 | `hardening` | TOMOYO MAC (learning mode on first boot), sshd lockdown (key-only when pubkey provided) |
 
+### Phase 1.5 — Pre-Flash Hardening (`phase1_5_harden.yml`)
+
+Applied before flashing to metal — maximizes what's portable:
+
+| Area | What |
+|---|---|
+| Browser | LibreWolf (privacy-hardened Firefox fork via overlay) |
+| Desktop | bspwm theming (custom color palette, picom translucency 85-92%, kawase blur, polybar), sxhkd keybinds, Xresources terminal colors, GTK dark theme |
+| Firewall | nftables baseline (default-drop input, rate-limited SSH/ICMP, log drops) |
+| Kernel hardening | sysctl (kptr_restrict, dmesg_restrict, ptrace_scope=2, unprivileged_bpf_disabled, tcp_timestamps=0) + GRUB cmdline (init_on_alloc/free, slab_nomerge, vsyscall=none) |
+| DNS privacy | DNS-over-TLS resolver (stubby) |
+| Security tools | lynis (audit), firejail (sandboxing), doas (minimal sudo), gnupg |
+| Shell | Custom .bashrc with tool aliases, history hardening, PATH wiring |
+| Network prep | Ansible control node, SSH config for FreeBSD/pfSense targets |
+| LLM prep | Ollama OpenRC init script, environment variables |
+
 ### Phase 2 — Metal Deployment
 
 | Role | What it does |
 |---|---|
-| `luks` | In-place LUKS2 encryption: backup rootfs → `cryptsetup luksFormat` (AES-XTS-512, argon2id) → restore → dracut crypt module → GRUB `cryptodisk` + `GRUB_ENABLE_CRYPTODISK=y` |
+| `luks` | In-place LUKS2 + LVM encryption: backup rootfs → `cryptsetup luksFormat` (AES-XTS-512, argon2id) → LVM (root + swap + home) → restore → dracut crypt+lvm modules → GRUB `cryptodisk` with LVM support |
 
 ## Project Structure
 
@@ -93,7 +109,8 @@ These constraints ensure one image boots both the QEMU oven and any target hardw
 │   └── all.yml                  # Single source of truth (all tunables)
 ├── stage_a_bake.yml             # Stage A playbook (ISO → installed OS)
 ├── base_provision.yml           # Stage B playbook (provision the OS)
-├── phase2_luks.yml              # Phase 2 LUKS encryption
+├── phase1_5_harden.yml          # Pre-flash hardening (desktop, firewall, etc.)
+├── phase2_luks.yml              # Phase 2 LUKS + LVM encryption
 ├── stage_a_resume.yml           # Resume Stage A (skip partition/stage3)
 ├── stage_a_bootloader.yml       # Re-run bootloader only
 ├── roles/

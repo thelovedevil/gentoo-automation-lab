@@ -57,8 +57,25 @@ Mandatory access control in learning mode from first boot. TOMOYO observes all p
 ### SSH Hardening
 Progressive lockdown: Stage A allows root password auth (build oven only). Stage B deploys operator SSH pubkey and switches to `PermitRootLogin prohibit-password` + `PasswordAuthentication no` + `MaxAuthTries 3`.
 
-### LUKS2
-Full-disk encryption (AES-XTS-512, argon2id KDF) applied at deployment time. GRUB unlocks the volume pre-boot via `cryptodisk` module. ESP remains unencrypted (contains only GRUB + kernel, no secrets).
+### LUKS2 + LVM
+Full-disk encryption (AES-XTS-512, argon2id KDF) applied at deployment time with LVM inside the LUKS container:
+
+```
+ESP (512M, vfat) — unencrypted
+Partition 2 → LUKS2 (aes-xts-plain64, argon2id)
+  └─ VG: gentoo
+       ├─ LV: root   (60GB, ext4)   — OS + packages
+       ├─ LV: swap   (8GB)          — matches RAM
+       └─ LV: home   (remainder)    — user data, projects, models
+```
+
+GRUB unlocks LUKS pre-boot via `cryptodisk` module with embedded `luks2`, `gcry_rijndael`, `gcry_sha512`, and `lvm` modules. Dracut initramfs carries `crypt`, `dm`, and `lvm` modules to activate the volume group after unlock. ESP remains unencrypted (contains only GRUB + kernel, no secrets).
+
+### Firewall (nftables)
+Default-drop input policy with explicit allows for established connections and rate-limited SSH (3/minute). Deployed in Phase 1.5 before metal flash.
+
+### Kernel Hardening (sysctl + boot params)
+Hardened via sysctl (`kptr_restrict=2`, `dmesg_restrict=1`, `yama.ptrace_scope=2`, `unprivileged_bpf_disabled=1`, `tcp_timestamps=0`) and GRUB cmdline (`init_on_alloc=1`, `init_on_free=1`, `slab_nomerge`, `page_alloc.shuffle=1`, `vsyscall=none`).
 
 ## LLM Runtime Architecture
 
