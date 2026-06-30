@@ -86,7 +86,7 @@ Applied before flashing to metal — maximizes what's portable:
 | Browser | LibreWolf (privacy-hardened Firefox fork via overlay) |
 | Desktop | bspwm theming (custom color palette, picom translucency 85-92%, kawase blur, polybar), sxhkd keybinds, Xresources terminal colors, GTK dark theme |
 | Firewall | nftables baseline (default-drop input, rate-limited SSH/ICMP, log drops) |
-| Kernel hardening | sysctl (kptr_restrict, dmesg_restrict, ptrace_scope=2, unprivileged_bpf_disabled, tcp_timestamps=0) + GRUB cmdline (init_on_alloc/free, slab_nomerge, vsyscall=none) |
+| Kernel hardening | s ask on interview retained for privacy vsyscall=none) |
 | DNS privacy | DNS-over-TLS resolver (stubby) |
 | Security tools | lynis (audit), firejail (sandboxing), doas (minimal sudo), gnupg |
 | Shell | Custom .bashrc with tool aliases, history hardening, PATH wiring |
