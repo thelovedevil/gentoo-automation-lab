@@ -44,10 +44,60 @@ Uses `sys-kernel/gentoo-kernel` (pre-configured, broad hardware support) with a 
 
 ### Phase 2: Custom Kernel
 Switches to `sys-kernel/gentoo-sources` for hand-tuned `.config`:
-- `-march=native` (Raptor Lake P/E-core aware)
+- `-march=native` (P/E-core aware scheduling)
 - `PREEMPT_RT` for timing-sensitive operations
-- eBPF/XDP for programmable packet processing
+- eBPF/XDP for programmable packet processing (see [eBPF Stack](#ebpf-stack) below)
 - Hardware-specific GPU, NIC, and sensor drivers
+
+## NVIDIA on PREEMPT_RT
+
+A non-obvious problem: NVIDIA's proprietary driver refuses to load on `PREEMPT_RT` kernels by default — the installer checks for RT and aborts, because NVIDIA's kernel module uses spinlocks and memory allocation patterns that conflict with RT's sleeping-spinlock semantics.
+
+The solution is a three-layer approach deployed across Gentoo's configuration system:
+
+```
+/etc/env.d/50nvidia              ← IGNORE_PREEMPT_RT_PRESENCE=1
+  ↓ env-update
+/etc/profile.env                 ← exported to all login shells
+  ↓
+nvidia.ko loads on PREEMPT_RT    ← driver skips RT presence check
+```
+
+**Why this works:** `IGNORE_PREEMPT_RT_PRESENCE=1` tells the NVIDIA driver to skip its RT kernel detection. The driver functions correctly on RT kernels for GPU compute and display — the spinlock concern is theoretical for workstation use (not hard-realtime control systems). Gentoo's `env.d` mechanism ensures the variable is set system-wide before any module loading.
+
+**Supporting configuration:**
+
+| File | Purpose |
+|---|---|
+| `/etc/env.d/50nvidia` | `IGNORE_PREEMPT_RT_PRESENCE=1` — survives upgrades |
+| `/etc/modprobe.d/nvidia.conf` | Module options: suspend notifiers, device file permissions (GID=video) |
+| `/etc/modprobe.d/blacklist-nouveau.conf` | Prevent open-source driver from racing nvidia.ko |
+| `/etc/X11/xorg.conf.d/10-nvidia.conf` | Xorg `Driver "nvidia"` with `NoLogo` |
+| `make.conf` | `VIDEO_CARDS="nvidia"` — ensures portage builds GPU-aware packages |
+
+**GRUB kernel selection:** When multiple kernels are installed (e.g., `gentoo-dist` for fallback + `gentoo-sources` for RT), `GRUB_DEFAULT` uses the nested submenu ID syntax to target the kernel whose modules match the installed NVIDIA driver version:
+
+```
+GRUB_DEFAULT="<submenu-id>/<entry-id>"
+```
+
+This prevents boot into a kernel where `nvidia.ko` wasn't built, which would silently fall back to software rendering.
+
+## eBPF Stack
+
+The kernel ships full eBPF support as builtins (not modules), enabling programmable packet processing and observability without recompilation:
+
+| Feature | Config | Use Case |
+|---|---|---|
+| BPF syscall + JIT | `CONFIG_BPF_SYSCALL=y`, `BPF_JIT_ALWAYS_ON` | Core eBPF execution engine |
+| BPF LSM | `CONFIG_BPF_LSM=y` | Security policy via BPF programs (complements TOMOYO) |
+| XDP sockets | `CONFIG_XDP_SOCKETS=y` | High-performance packet processing before the network stack |
+| Kprobes/Uprobes | `CONFIG_KPROBES=y`, `CONFIG_UPROBES=y` | Dynamic kernel/userspace tracing |
+| BTF (CO-RE) | `CONFIG_DEBUG_INFO_BTF=y` | Compile-once-run-everywhere BPF programs across kernel versions |
+| Cgroup BPF | `CONFIG_CGROUP_BPF=y` | Per-cgroup network/device policy |
+| Net classifier | `CONFIG_NET_CLS_BPF=m` | TC/traffic-control integration |
+
+Userspace tools (`bpftool`, `bpftrace`, `bcc`) are installed at first boot. The combination of eBPF + XDP + PREEMPT_RT enables low-latency programmable networking — timing-sensitive packet manipulation with deterministic scheduling guarantees.
 
 ## Security Model
 

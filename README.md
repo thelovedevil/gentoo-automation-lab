@@ -86,7 +86,7 @@ Applied before flashing to metal — maximizes what's portable:
 | Browser | LibreWolf (privacy-hardened Firefox fork via overlay) |
 | Desktop | bspwm theming (custom color palette, picom translucency 85-92%, kawase blur, polybar), sxhkd keybinds, Xresources terminal colors, GTK dark theme |
 | Firewall | nftables baseline (default-drop input, rate-limited SSH/ICMP, log drops) |
-| Kernel hardening | s ask on interview retained for privacy vsyscall=none) |
+| Kernel hardening | sysctl (kptr_restrict, dmesg_restrict, ptrace_scope=2, unprivileged_bpf_disabled, tcp_timestamps=0) + GRUB cmdline (init_on_alloc/free, slab_nomerge, vsyscall=none) |
 | DNS privacy | DNS-over-TLS resolver (stubby) |
 | Security tools | lynis (audit), firejail (sandboxing), doas (minimal sudo), gnupg |
 | Shell | Custom .bashrc with tool aliases, history hardening, PATH wiring |
@@ -98,6 +98,20 @@ Applied before flashing to metal — maximizes what's portable:
 | Role | What it does |
 |---|---|
 | `luks` | In-place LUKS2 + LVM encryption: backup rootfs → `cryptsetup luksFormat` (AES-XTS-512, argon2id) → LVM (root + swap + home) → restore → dracut crypt+lvm modules → GRUB `cryptodisk` with LVM support |
+
+### Phase 2.5 — First-Boot Bootstrap (`first-boot.sh`)
+
+Idempotent script run once on metal after LUKS boot to complete the environment:
+
+| Phase | What |
+|---|---|
+| NVIDIA | `eselect-opengl` + set nvidia provider + verify `nvidia-smi` |
+| Packages | `emerge` Node.js, GitHub CLI, LibreWolf, eBPF tools (bpftool, bpftrace, bcc) |
+| GitHub | `gh auth login` + clone all project repositories |
+| Dev tools | Claude Code (via npx), API key configuration |
+| Desktop | LibreWolf launched via firejail sandboxing |
+
+The script uses `emerge --noreplace` and existence checks throughout — safe to re-run at any time.
 
 ## Project Structure
 
@@ -132,10 +146,13 @@ Applied before flashing to metal — maximizes what's portable:
 │   ├── make.conf.j2
 │   ├── fstab.j2
 │   └── dracut.conf.j2
-└── scripts/
-    ├── create-disk.sh           # qemu-img create
-    ├── boot-installer.sh        # Boot ISO (Stage A)
-    └── boot-installed.sh        # Boot installed OS (Stage B / testing)
+├── scripts/
+│   ├── create-disk.sh           # qemu-img create
+│   ├── boot-installer.sh        # Boot ISO (Stage A)
+│   ├── boot-installed.sh        # Boot installed OS (Stage B / testing)
+│   └── first-boot.sh            # Phase 2.5 metal bootstrap (idempotent)
+└── docs/
+    └── nvidia-preempt-rt.md     # NVIDIA + PREEMPT_RT coexistence methodology
 ```
 
 ## Key Design Decisions
@@ -157,7 +174,10 @@ The image ships a Python venv with the full LangChain/LangGraph stack plus llama
 Encryption is a deployment-time concern, not a build-time one. The Phase 2 LUKS playbook performs in-place encryption on the target disk: backup → encrypt → restore → rebuild initramfs with `crypt` module → GRUB `cryptodisk`. This avoids passphrase prompts during the VM build cycle while ensuring the production deployment is fully encrypted.
 
 ### Kernel Configuration
-The distribution kernel (`gentoo-kernel`) is used for portability. A config fragment merges TOMOYO LSM, advanced networking knobs (policy routing, conntrack, qdiscs, netns), and both virtio and metal storage/NIC drivers as builtins. Phase 2 switches to `gentoo-sources` for hand-rolled kernel tuning.
+The distribution kernel (`gentoo-kernel`) is used for portability. A config fragment merges TOMOYO LSM, advanced networking knobs (policy routing, conntrack, qdiscs, netns), and both virtio and metal storage/NIC drivers as builtins. Phase 2 switches to `gentoo-sources` for hand-rolled kernel tuning with `PREEMPT_RT` and full eBPF/XDP support (BPF_SYSCALL, BPF_JIT, BPF_LSM, XDP_SOCKETS, DEBUG_INFO_BTF for CO-RE).
+
+### NVIDIA on PREEMPT_RT Kernels
+NVIDIA's proprietary driver refuses to load on `PREEMPT_RT` kernels by default. The solution uses Gentoo's `env.d` system to set `IGNORE_PREEMPT_RT_PRESENCE=1` system-wide — the variable is baked into `/etc/profile.env` via `env-update`, ensuring it's set before module loading. Combined with nouveau blacklisting, explicit Xorg driver config, and GRUB kernel selection targeting the correct module tree, this provides reliable GPU acceleration on RT kernels. See [ARCHITECTURE.md](ARCHITECTURE.md#nvidia-on-preempt_rt) for the full methodology.
 
 ## Lessons Learned
 
@@ -210,7 +230,7 @@ ansible-playbook -i inventory_metal.ini phase2_luks.yml \
 
 ## Technology Stack
 
-Ansible · QEMU/KVM · OVMF (UEFI) · Gentoo Linux · OpenRC · GRUB2 · dracut · TOMOYO · LUKS2/cryptsetup · bspwm · Emacs · LangChain · LangGraph · Python · Go · Rust · Portage
+Ansible · QEMU/KVM · OVMF (UEFI) · Gentoo Linux · OpenRC · GRUB2 · dracut · TOMOYO · LUKS2/cryptsetup · NVIDIA (PREEMPT_RT) · eBPF/XDP · bpftrace · bspwm · firejail · Emacs · LangChain · LangGraph · Python · Go · Rust · Portage
 
 ## License
 
