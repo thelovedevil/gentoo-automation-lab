@@ -69,7 +69,7 @@ Partition 2 → LUKS2 (aes-xts-plain64, argon2id)
        └─ LV: home   (remainder)    — user data, projects, models
 ```
 
-GRUB unlocks LUKS pre-boot via `cryptodisk` module with embedded `luks2`, `gcry_rijndael`, `gcry_sha512`, and `lvm` modules. Dracut initramfs carries `crypt`, `dm`, and `lvm` modules to activate the volume group after unlock. ESP remains unencrypted (contains only GRUB + kernel, no secrets).
+GRUB unlocks LUKS pre-boot via `cryptodisk` module with embedded `luks2`, `gcry_rijndael`, `gcry_sha512`, and `lvm` modules. Dracut initramfs is built with `hostonly=no` and carries `crypt`, `dm`, and `lvm` modules plus dual drivers (virtio + metal: NVMe, AHCI, dm-crypt) to activate the volume group after unlock on any hardware. fstab is keyed on UUID (not `/dev/gentoo/*` device paths) for portability. ESP remains unencrypted (contains only GRUB + kernel, no secrets).
 
 ### Firewall (nftables)
 Default-drop input policy with explicit allows for established connections and rate-limited SSH (3/minute). Deployed in Phase 1.5 before metal flash.

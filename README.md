@@ -48,7 +48,7 @@ These constraints ensure one image boots both the QEMU oven and any target hardw
 |---|---|
 | `-march=x86-64-v3` only, never `-march=native` | Portable binaries; native tuning is a Phase 2 additive step |
 | GPT + UEFI + real ESP | ESP transfers as-is to metal; GRUB `--removable` boots arbitrary firmware |
-| fstab/bootloader keyed on `PARTUUID` | Device names change across hardware (`vda` → `nvme0n1` → `sda`) |
+| fstab/bootloader keyed on `PARTUUID`/`UUID` | Device names change across hardware (`vda` → `nvme0n1` → `sda`); Phase 2 uses UUID for LVM volumes |
 | Kernel + initramfs carry virtio AND metal drivers | `dracut --no-hostonly` builds a generic initramfs with NVMe, AHCI, common NICs |
 | OpenRC + minimal USE flags | Clean baseline; small attack surface |
 

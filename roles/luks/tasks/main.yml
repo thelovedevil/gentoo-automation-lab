@@ -130,14 +130,14 @@
   register: _luks_uuid
   changed_when: false
 
-- name: "[P2] Capture ESP PARTUUID"
-  ansible.builtin.command: "blkid -s PARTUUID -o value {{ luks_esp_part }}"
-  register: _esp_partuuid
+- name: "[P2] Capture ESP UUID"
+  ansible.builtin.command: "blkid -s UUID -o value {{ luks_esp_part }}"
+  register: _esp_uuid
   changed_when: false
 
 - name: "[P2] Show UUIDs"
   ansible.builtin.debug:
-    msg: "LUKS UUID={{ _luks_uuid.stdout | trim }}  ESP PARTUUID={{ _esp_partuuid.stdout | trim }}"
+    msg: "LUKS UUID={{ _luks_uuid.stdout | trim }}  ESP UUID={{ _esp_uuid.stdout | trim }}"
 
 - name: "[P2] Write /etc/crypttab"
   ansible.builtin.copy:
@@ -147,30 +147,47 @@
       # <name>          <device>                                          <password>  <options>
       gentoo-crypt      UUID={{ _luks_uuid.stdout | trim }}               none        luks,discard
 
-- name: "[P2] Write /etc/fstab (LUKS + LVM)"
+- name: "[P2] Capture LV UUIDs"
+  ansible.builtin.command: "blkid -s UUID -o value {{ item }}"
+  loop:
+    - /dev/mapper/gentoo-root
+    - /dev/mapper/gentoo-home
+    - /dev/mapper/gentoo-swap
+  register: _lv_uuids
+  changed_when: false
+
+- name: "[P2] Write /etc/fstab (LUKS + LVM, keyed on UUID)"
   ansible.builtin.copy:
     dest: /mnt/gentoo/etc/fstab
     mode: "0644"
     content: |
       # Managed by gentoo-build. LUKS+LVM encrypted (Phase 2).
-      /dev/gentoo/root                                     /          ext4  defaults,noatime,discard  0 1
-      /dev/gentoo/home                                     /home      ext4  defaults,noatime,discard  0 2
-      /dev/gentoo/swap                                     none       swap  sw                         0 0
-      PARTUUID={{ _esp_partuuid.stdout | trim }}           /boot/efi  vfat  defaults,noatime          0 2
+      UUID={{ _lv_uuids.results[0].stdout | trim }}  /          ext4  defaults,noatime,discard  0 1
+      UUID={{ _esp_uuid.stdout | trim }}               /boot/efi  vfat  defaults,noatime          0 2
+      UUID={{ _lv_uuids.results[1].stdout | trim }}  /home      ext4  defaults,noatime,discard  0 2
+      UUID={{ _lv_uuids.results[2].stdout | trim }}  none       swap  sw                        0 0
+
+- name: "[P2] Remove Phase-1 dracut config (replaced by LUKS+LVM config)"
+  ansible.builtin.file:
+    path: /mnt/gentoo/etc/dracut.conf.d/gentoo.conf
+    state: absent
 
 - name: "[P2] Configure dracut for LUKS + LVM"
   ansible.builtin.copy:
     dest: /mnt/gentoo/etc/dracut.conf.d/10-luks-lvm.conf
     mode: "0644"
     content: |
+      # Managed by gentoo-build. Generic initramfs for LUKS+LVM on metal.
+      hostonly="no"
       add_dracutmodules+=" crypt dm lvm "
-      install_items+=" /etc/crypttab "
+      add_drivers+=" virtio_blk virtio_scsi virtio_net virtio_pci nvme ahci dm-crypt dm-mod "
+      install_items+=" /sbin/cryptsetup /etc/crypttab "
 
 - name: "[P2] Configure GRUB for LUKS (main config, NOT grub.d — Gentoo doesn't source it)"
   ansible.builtin.lineinfile:
     path: /mnt/gentoo/etc/default/grub
     regexp: '^GRUB_CMDLINE_LINUX='
-    line: 'GRUB_CMDLINE_LINUX="rd.luks.uuid={{ _luks_uuid.stdout | trim }} root=/dev/gentoo/root security=tomoyo console=ttyS0,115200 init_on_alloc=1 init_on_free=1 slab_nomerge page_alloc.shuffle=1 randomize_kstack_offset=on vsyscall=none"'
+    line: 'GRUB_CMDLINE_LINUX="rd.luks.uuid={{ _luks_uuid.stdout | trim }} rd.lvm.vg=gentoo root=/dev/mapper/gentoo-root security=tomoyo console=ttyS0,115200 init_on_alloc=1 init_on_free=1 slab_nomerge page_alloc.shuffle=1 randomize_kstack_offset=on vsyscall=none"'
 
 - name: "[P2] Enable GRUB cryptodisk"
   ansible.builtin.lineinfile:

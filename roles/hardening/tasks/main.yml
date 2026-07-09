@@ -13,12 +13,19 @@
   changed_when: true
   # CONFIRM atom on first run.
 
-- name: "[B] Enable {{ kernel_lsm }} on the kernel cmdline"
+- name: "[B] Read current GRUB_CMDLINE_LINUX"
+  ansible.builtin.shell: |
+    grep '^GRUB_CMDLINE_LINUX=' /etc/default/grub | sed 's/^GRUB_CMDLINE_LINUX="\(.*\)"/\1/' || echo ""
+  register: _grub_cmdline
+  changed_when: false
+
+- name: "[B] Append security={{ kernel_lsm }} to kernel cmdline (if not already present)"
   ansible.builtin.lineinfile:
     path: /etc/default/grub
     regexp: '^#?GRUB_CMDLINE_LINUX='
-    line: 'GRUB_CMDLINE_LINUX="security={{ kernel_lsm }}"'
+    line: 'GRUB_CMDLINE_LINUX="{{ _grub_cmdline.stdout | trim }} security={{ kernel_lsm }}"'
     create: true
+  when: "'security=' not in (_grub_cmdline.stdout | default(''))"
 
 - name: "[B] Regenerate grub.cfg with the LSM cmdline"
   ansible.builtin.command: "grub-mkconfig -o /boot/grub/grub.cfg"
