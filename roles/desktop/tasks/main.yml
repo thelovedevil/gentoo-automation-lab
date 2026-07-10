@@ -133,7 +133,6 @@
       frame-opacity = 0.9;
 
       opacity-rule = [
-        "100:class_g = 'LibreWolf'",
         "95:class_g = 'Emacs'",
         "90:class_g = 'sakura'"
       ];
