@@ -17,11 +17,14 @@ step() { echo -e "\n${GRN}[*]${NC} $1"; }
 warn() { echo -e "${YEL}[!]${NC} $1"; }
 fail() { echo -e "${RED}[X]${NC} $1"; exit 1; }
 
-# ---- Phase 0: NVIDIA + OpenGL ----
-step "Setting up NVIDIA OpenGL provider"
-emerge --noreplace app-eselect/eselect-opengl
-eselect opengl set nvidia
+# ---- Phase 0: NVIDIA ----
+step "Loading NVIDIA driver"
 modprobe nvidia && nvidia-smi && step "NVIDIA driver loaded" || warn "NVIDIA modprobe failed — check kernel/driver match"
+if eselect opengl list &>/dev/null; then
+    eselect opengl set nvidia && step "OpenGL provider set to nvidia"
+else
+    warn "eselect opengl not available — nvidia-drivers handles this automatically"
+fi
 
 # ---- Phase 1: System packages ----
 step "Syncing librewolf overlay"
