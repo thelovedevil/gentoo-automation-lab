@@ -39,7 +39,7 @@
 
 - name: "[B] Deploy laintheme"
   ansible.builtin.copy:
-    src: {{ controller_dotfiles_path }}/.emacs.d/themes/laintheme-theme.el
+    src: "{{ controller_dotfiles_path }}/.emacs.d/themes/laintheme-theme.el"
     dest: "{{ operator_home }}/.emacs.d/themes/laintheme-theme.el"
     owner: "{{ operator_user }}"
     group: "{{ operator_user }}"
@@ -63,7 +63,7 @@
 
 - name: "[B] Deploy git config"
   ansible.builtin.copy:
-    src: {{ controller_dotfiles_path }}/.config/git/
+    src: "{{ controller_dotfiles_path }}/.config/git/"
     dest: "{{ operator_home }}/.config/git/"
     owner: "{{ operator_user }}"
     group: "{{ operator_user }}"
