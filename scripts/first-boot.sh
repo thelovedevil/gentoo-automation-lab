@@ -32,7 +32,7 @@ emaint sync -r librewolf
 
 step "Installing Node.js + GitHub CLI + LibreWolf + eBPF tools"
 emerge --noreplace net-libs/nodejs dev-vcs/gh www-client/librewolf \
-    dev-util/bpftool dev-util/bpftrace dev-util/bcc
+    dev-util/bpftool dev-debug/bpftrace dev-util/bcc
 
 step "Verifying installations"
 node --version || fail "Node.js install failed"
