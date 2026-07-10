@@ -42,11 +42,11 @@
       bspc config gapless_monocle       true
       bspc config focus_follows_pointer true
 
-      # ---- colors (dark with red accents) ----
-      bspc config normal_border_color   "#282828"
-      bspc config active_border_color   "#282828"
-      bspc config focused_border_color  "#c25e5e"
-      bspc config presel_feedback_color "#dc7171"
+      # ---- colors (vermillion on sumi black) ----
+      bspc config normal_border_color   "#0A0A0A"
+      bspc config active_border_color   "#0A0A0A"
+      bspc config focused_border_color  "#B7410E"
+      bspc config presel_feedback_color "#CE5C5C"
 
       # ---- rules ----
       bspc rule -a Emacs desktop='^3' state=tiled
@@ -74,7 +74,7 @@
 
       # launcher
       super + d
-      	dmenu_run -nb '#000000' -nf '#d0d0d0' -sb '#c25e5e' -sf '#000000'
+      	dmenu_run -fn 'Noto Sans CJK JP:size=9' -nb '#000000' -nf '#D4C5AA' -sb '#B7410E' -sf '#D4C5AA'
 
       # emacs
       super + e
@@ -168,6 +168,145 @@
 
       # vsync
       vsync = true;
+
+- name: "[B] Deploy polybar config"
+  ansible.builtin.copy:
+    dest: "{{ operator_home }}/.config/polybar/config.ini"
+    owner: "{{ operator_user }}"
+    group: "{{ operator_user }}"
+    mode: "0644"
+    content: |
+      [colors]
+      background = #000000
+      background-alt = #0A0A0A
+      foreground = #D4C5AA
+      primary = #B7410E
+      secondary = #CE5C5C
+      alert = #B7282E
+      disabled = #505050
+
+      [bar/main]
+      width = 100%
+      height = 20pt
+      radius = 0
+      background = ${colors.background}
+      foreground = ${colors.foreground}
+      line-size = 1pt
+      border-bottom-size = 0
+      padding-left = 2
+      padding-right = 2
+      module-margin = 2
+      separator = ·
+      separator-foreground = ${colors.disabled}
+      font-0 = "Noto Sans CJK JP:size=8:weight=light;2"
+      font-1 = "Noto Sans Mono:size=8;2"
+      modules-left = bspwm
+      modules-center = date
+      modules-right = memory cpu network
+
+      [module/bspwm]
+      type = internal/bspwm
+      label-focused = %name%
+      label-focused-foreground = ${colors.primary}
+      label-focused-background = ${colors.background-alt}
+      label-focused-underline = ${colors.primary}
+      label-focused-padding = 1
+      label-occupied = %name%
+      label-occupied-foreground = ${colors.foreground}
+      label-occupied-padding = 1
+      label-urgent = %name%
+      label-urgent-foreground = ${colors.background}
+      label-urgent-background = ${colors.alert}
+      label-urgent-padding = 1
+      label-empty = %name%
+      label-empty-foreground = ${colors.disabled}
+      label-empty-padding = 1
+
+      [module/cpu]
+      type = internal/cpu
+      interval = 2
+      format-prefix = "処理 "
+      format-prefix-foreground = ${colors.primary}
+      format-prefix-font = 1
+      label = %percentage:2%%
+      label-font = 2
+
+      [module/memory]
+      type = internal/memory
+      interval = 2
+      format-prefix = "記憶 "
+      format-prefix-foreground = ${colors.primary}
+      format-prefix-font = 1
+      label = %percentage_used:2%%
+      label-font = 2
+
+      [module/network]
+      type = internal/network
+      interface-type = wired
+      interval = 5
+      format-connected = <label-connected>
+      format-connected-prefix = "網 "
+      format-connected-prefix-foreground = ${colors.primary}
+      label-connected = %local_ip%
+      label-connected-foreground = ${colors.foreground}
+      label-disconnected = 切断
+      label-disconnected-foreground = ${colors.disabled}
+
+      [module/date]
+      type = internal/date
+      interval = 1
+      date = %Y年%m月%d日 %H:%M
+      label = %date%
+      label-foreground = ${colors.foreground}
+
+      [settings]
+      screenchange-reload = true
+
+- name: "[B] Create dunst config directory"
+  ansible.builtin.file:
+    path: "{{ operator_home }}/.config/dunst"
+    state: directory
+    owner: "{{ operator_user }}"
+    group: "{{ operator_user }}"
+    mode: "0755"
+
+- name: "[B] Deploy dunstrc"
+  ansible.builtin.copy:
+    dest: "{{ operator_home }}/.config/dunst/dunstrc"
+    owner: "{{ operator_user }}"
+    group: "{{ operator_user }}"
+    mode: "0644"
+    content: |
+      [global]
+      font = Noto Sans CJK JP 9
+      format = "<b>%s</b>\n%b"
+      alignment = right
+      origin = top-right
+      offset = 8x8
+      frame_width = 1
+      frame_color = "#B7410E"
+      separator_color = frame
+      corner_radius = 4
+      transparency = 10
+      padding = 8
+      horizontal_padding = 12
+      icon_position = off
+
+      [urgency_low]
+      background = "#000000"
+      foreground = "#D4C5AA"
+      timeout = 4
+
+      [urgency_normal]
+      background = "#000000"
+      foreground = "#D4C5AA"
+      timeout = 8
+
+      [urgency_critical]
+      background = "#0A0A0A"
+      foreground = "#B7282E"
+      frame_color = "#B7282E"
+      timeout = 0
 
 - name: "[B] Create wallpaper directory"
   ansible.builtin.file:
