@@ -181,6 +181,16 @@
       # vsync
       vsync = true;
 
+      # NVIDIA GLX fixes
+      glx-no-stencil = true;
+      use-damage = false;
+
+- name: "[B] Ensure picom has OpenGL support (required for GLX backend)"
+  ansible.builtin.copy:
+    dest: /etc/portage/package.use/picom
+    mode: "0644"
+    content: "x11-misc/picom opengl\n"
+
 - name: "[B] Deploy polybar config"
   ansible.builtin.copy:
     dest: "{{ operator_home }}/.config/polybar/config.ini"

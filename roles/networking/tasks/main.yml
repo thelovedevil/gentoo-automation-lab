@@ -19,3 +19,32 @@
   ansible.builtin.command: rc-update add tor default
   changed_when: true
   ignore_errors: true
+
+# ---- DNS hardening (prevent ISP leak) ----
+- name: "[B] Pin DNS to gateway (resolv.conf.head)"
+  ansible.builtin.copy:
+    dest: /etc/resolv.conf.head
+    mode: "0644"
+    content: |
+      # DNS via gateway (forwards to upstream resolver over VPN tunnel)
+      nameserver {{ gateway_dns | default('192.168.1.1') }}
+
+- name: "[B] Pin DNS in resolvconf.conf"
+  ansible.builtin.lineinfile:
+    path: /etc/resolvconf.conf
+    regexp: '^#?name_servers='
+    line: "name_servers={{ gateway_dns | default('192.168.1.1') }}"
+
+- name: "[B] Prevent dhcpcd from overwriting resolv.conf"
+  ansible.builtin.lineinfile:
+    path: /etc/dhcpcd.conf
+    line: 'nohook resolv.conf'
+    create: true
+
+- name: "[B] Disable IPv6 in dhcpcd (prevent RA DNS injection)"
+  ansible.builtin.blockinfile:
+    path: /etc/dhcpcd.conf
+    marker: "# {mark} IPv6 hardening"
+    block: |
+      noipv6rs
+      noipv6

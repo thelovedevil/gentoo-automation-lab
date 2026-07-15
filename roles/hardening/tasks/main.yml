@@ -58,6 +58,50 @@
     - make_video_cards is defined and 'nvidia' in (make_video_cards | default(''))
     - "'nvidia-drm.modeset' not in (_grub_cmdline.stdout | default(''))"
 
+# ---- system logging (metalog) ----
+- name: "[B] Enable metalog in default runlevel"
+  ansible.builtin.command: rc-update add metalog default
+  changed_when: true
+  ignore_errors: true
+
+# ---- nftables DNS leak prevention ----
+- name: "[B] Deploy nftables rules with DNS leak prevention"
+  ansible.builtin.copy:
+    dest: /var/lib/nftables/rules-save
+    mode: "0600"
+    content: |
+      #!/sbin/nft -f
+      flush ruleset
+      table inet filter {
+      	chain input {
+      		type filter hook input priority 0; policy drop;
+      		iif "lo" accept
+      		ct state established,related accept
+      		ip protocol icmp limit rate 4/second burst 5 packets accept
+      		ip6 nexthdr icmpv6 limit rate 4/second burst 5 packets accept
+      		tcp dport 22 ct state new limit rate 3/minute burst 5 packets accept
+      		tcp dport 8080 ip saddr 127.0.0.1 accept
+      		ct state invalid drop
+      		log prefix "[nftables-drop] " limit rate 5/minute burst 5 packets
+      		drop
+      	}
+
+      	chain forward {
+      		type filter hook forward priority 0; policy drop;
+      	}
+
+      	chain output {
+      		type filter hook output priority 0; policy accept;
+      		udp dport 53 ip daddr {{ gateway_dns | default('192.168.1.1') }} accept
+      		tcp dport 53 ip daddr {{ gateway_dns | default('192.168.1.1') }} accept
+      		udp dport 53 ip daddr 127.0.0.1 accept
+      		tcp dport 53 ip daddr 127.0.0.1 accept
+      		udp dport 53 log prefix "[dns-leak] " drop
+      		tcp dport 53 log prefix "[dns-leak] " drop
+      		tcp dport 853 ip daddr != {{ gateway_dns | default('192.168.1.1') }} log prefix "[dot-leak] " drop
+      	}
+      }
+
 # ---- sshd hardening (lineinfile on main config — no Include dependency) ----
 - name: "[B] Inject operator SSH key (enables full keys-only lockdown)"
   ansible.builtin.authorized_key:
