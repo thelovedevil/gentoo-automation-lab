@@ -80,7 +80,15 @@
         content: |
           #!/bin/sh
           # ---- monitors ----
-          bspc monitor -d I II III IV V VI VII VIII IX X
+          # Dynamically assign desktops to all connected monitors
+          monitors=$(xrandr --query | grep ' connected' | cut -d' ' -f1)
+          count=$(echo "$monitors" | wc -l)
+          if [ "$count" -eq 1 ]; then
+              bspc monitor "$(echo $monitors | head -1)" -d 一 二 三 四 五 六 七 八 九 十
+          else
+              bspc monitor "$(echo $monitors | sed -n 1p)" -d 一 二 三 四 五
+              bspc monitor "$(echo $monitors | sed -n 2p)" -d 六 七 八 九 十
+          fi
 
           # ---- global settings ----
           bspc config border_width          2
@@ -103,11 +111,15 @@
           # ---- autostart ----
           pgrep -x sxhkd > /dev/null || sxhkd &
           pgrep -x picom > /dev/null || picom --daemon &
-          pgrep -x polybar > /dev/null || polybar main &
+          if ! pgrep -x polybar > /dev/null; then
+              for m in $(xrandr --query | grep ' connected' | cut -d' ' -f1); do
+                  MONITOR=$m polybar main &
+              done
+          fi
           pgrep -x dunst > /dev/null || dunst &
 
           # wallpaper (centered on black background)
-          [ -f ~/.local/share/wallpapers/wall.jpg ] && feh --bg-center --image-bg '#000000' ~/.local/share/wallpapers/wall.jpg &
+          [ -f ~/.local/share/wallpapers/wall.jpg ] && feh --no-xinerama --bg-center --image-bg '#000000' ~/.local/share/wallpapers/wall.jpg &
 
     - name: "[1.5] Deploy sxhkdrc"
       ansible.builtin.copy:
@@ -188,7 +200,7 @@
           opacity-rule = [
             "100:class_g = 'LibreWolf'",
             "95:class_g = 'Emacs'",
-            "100:class_g = 'sakura'"
+            "90:class_g = 'sakura'"
             # sakura VTE alpha handles translucency; compositor at 100% keeps text crisp
           ];
 
@@ -240,6 +252,7 @@
           disabled = #707070
 
           [bar/main]
+          monitor = ${env:MONITOR:}
           width = 100%
           height = 24pt
           radius = 0
@@ -376,6 +389,8 @@
           net.ipv4.tcp_timestamps = 0
           net.ipv6.conf.all.accept_redirects = 0
           net.ipv6.conf.default.accept_redirects = 0
+          net.ipv6.conf.all.disable_ipv6 = 1
+          net.ipv6.conf.default.disable_ipv6 = 1
 
           # --- kernel hardening ---
           kernel.kptr_restrict = 2
@@ -457,22 +472,24 @@
       ignore_errors: true
 
     # ================================================================
-    # 5. DNS PRIVACY (DNS-over-TLS via stubby)
+    # 5. DNS PRIVACY (pfSense Unbound via VPN tunnel)
     # ================================================================
-    - name: "[1.5] Install DNS-over-TLS resolver"
-      ansible.builtin.shell: >-
-        ACCEPT_KEYWORDS="~amd64" emerge --noreplace net-dns/stubby || true
-      changed_when: true
-      async: 1800
-      poll: 30
-
-    - name: "[1.5] Configure resolv.conf for local resolver"
+    - name: "[1.5] Pin DNS to pfSense gateway (Unbound forwarding through VPN)"
       ansible.builtin.copy:
-        dest: /etc/resolv.conf.head
+        dest: /etc/resolv.conf
         mode: "0644"
         content: |
-          # DNS-over-TLS via stubby (localhost)
-          nameserver 127.0.0.1
+          # DNS via pfSense gateway (Unbound forwarding through ProtonVPN tunnel)
+          nameserver 192.168.1.1
+
+    - name: "[1.5] Harden dhcpcd — disable IPv6 and DNS override"
+      ansible.builtin.blockinfile:
+        path: /etc/dhcpcd.conf
+        marker: "# {mark} MANAGED BY gentoo-build/phase1_5"
+        block: |
+          noipv6rs
+          noipv6
+          nohook resolv.conf
 
     # ================================================================
     # 6. ADDITIONAL SECURITY TOOLS

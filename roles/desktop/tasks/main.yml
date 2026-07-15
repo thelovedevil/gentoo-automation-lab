@@ -32,7 +32,15 @@
     content: |
       #!/bin/sh
       # ---- monitors ----
-      bspc monitor -d 一 二 三 四 五 六 七 八 九 十
+      # Dynamically assign desktops to all connected monitors
+      monitors=$(xrandr --query | grep ' connected' | cut -d' ' -f1)
+      count=$(echo "$monitors" | wc -l)
+      if [ "$count" -eq 1 ]; then
+          bspc monitor "$(echo $monitors | head -1)" -d 一 二 三 四 五 六 七 八 九 十
+      else
+          bspc monitor "$(echo $monitors | sed -n 1p)" -d 一 二 三 四 五
+          bspc monitor "$(echo $monitors | sed -n 2p)" -d 六 七 八 九 十
+      fi
 
       # ---- global settings ----
       bspc config border_width          2
@@ -54,11 +62,15 @@
       # ---- autostart ----
       pgrep -x sxhkd > /dev/null || sxhkd &
       pgrep -x picom > /dev/null || picom --daemon &
-      pgrep -x polybar > /dev/null || polybar main &
+      if ! pgrep -x polybar > /dev/null; then
+          for m in $(xrandr --query | grep ' connected' | cut -d' ' -f1); do
+              MONITOR=$m polybar main &
+          done
+      fi
       pgrep -x dunst > /dev/null || dunst &
 
       # wallpaper (scaled to fit, centered on black background)
-      [ -f ~/.local/share/wallpapers/wall.jpg ] && feh --bg-center --image-bg '#000000' ~/.local/share/wallpapers/wall.jpg &
+      [ -f ~/.local/share/wallpapers/wall.jpg ] && feh --no-xinerama --bg-center --image-bg '#000000' ~/.local/share/wallpapers/wall.jpg &
 
 - name: "[B] Deploy sxhkdrc"
   ansible.builtin.copy:
@@ -134,7 +146,7 @@
 
       opacity-rule = [
         "95:class_g = 'Emacs'",
-        "100:class_g = 'sakura'"
+        "90:class_g = 'sakura'"
         # sakura VTE alpha handles translucency; compositor at 100% keeps text crisp
       ];
 
@@ -186,6 +198,7 @@
       disabled = #505050
 
       [bar/main]
+      monitor = ${env:MONITOR:}
       width = 100%
       height = 20pt
       radius = 0
