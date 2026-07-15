@@ -58,7 +58,7 @@
       pgrep -x dunst > /dev/null || dunst &
 
       # wallpaper (scaled to fit, centered on black background)
-      [ -f ~/.local/share/wallpapers/wall.jpg ] && feh --bg-max --image-bg '#000000' ~/.local/share/wallpapers/wall.jpg &
+      [ -f ~/.local/share/wallpapers/wall.jpg ] && feh --bg-center --image-bg '#000000' ~/.local/share/wallpapers/wall.jpg &
 
 - name: "[B] Deploy sxhkdrc"
   ansible.builtin.copy:
@@ -134,7 +134,8 @@
 
       opacity-rule = [
         "95:class_g = 'Emacs'",
-        "90:class_g = 'sakura'"
+        "100:class_g = 'sakura'"
+        # sakura VTE alpha handles translucency; compositor at 100% keeps text crisp
       ];
 
       # fade

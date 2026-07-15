@@ -188,7 +188,8 @@
           opacity-rule = [
             "100:class_g = 'LibreWolf'",
             "95:class_g = 'Emacs'",
-            "90:class_g = 'sakura'"
+            "100:class_g = 'sakura'"
+            # sakura VTE alpha handles translucency; compositor at 100% keeps text crisp
           ];
 
           # fade
