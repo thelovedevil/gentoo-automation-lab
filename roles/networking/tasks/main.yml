@@ -41,10 +41,9 @@
     line: 'nohook resolv.conf'
     create: true
 
-- name: "[B] Disable IPv6 in dhcpcd (prevent RA DNS injection)"
+- name: "[B] Enable IPv6 with stable private addresses in dhcpcd"
   ansible.builtin.blockinfile:
     path: /etc/dhcpcd.conf
-    marker: "# {mark} IPv6 hardening"
+    marker: "# {mark} IPv6 config"
     block: |
-      noipv6rs
-      noipv6
+      slaac private
