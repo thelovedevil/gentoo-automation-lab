@@ -38,7 +38,7 @@ tls_provider: openssl         # openssl | libressl    [DECISION: openssl]
 
 # ---- Kernel ----------------------------------------------------------------
 kernel_source: gentoo-kernel  # dist-kernel = generic/portable default; gentoo-sources = manual (your wheelhouse, Phase-2 tuning)
-kernel_preempt: voluntary     # tickless now; PREEMPT_RT = Phase-2 metal option
+kernel_preempt: none          # PREEMPT_NONE for throughput; RT actively hurts inference
 kernel_lsm: tomoyo            # TOMOYO MAC in-kernel (hardening choice)
 # Dual-driver INVARIANT: kernel + initramfs carry BOTH virtio AND metal drivers
 kernel_drivers_virtio: true   # virtio-blk/scsi/net (QEMU)
@@ -106,6 +106,7 @@ desktop_packages:
   - media-fonts/dejavu
   - media-fonts/noto
   - media-fonts/liberation-fonts
+  - media-fonts/noto-cjk          # CJK glyphs for polybar/sakura Japanese rendering
 
 # ---- Editor ---------------------------------------------------------------
 editor_package: app-editors/emacs

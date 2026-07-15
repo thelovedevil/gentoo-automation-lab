@@ -38,6 +38,26 @@
   ignore_errors: true
   # learning mode auto-generates domain policy from observed behavior; tighten later.
 
+# ---- NVIDIA module loading (out-of-tree, must be =m — load explicitly) ----
+- name: "[B] Configure NVIDIA modules to load at boot"
+  ansible.builtin.copy:
+    dest: /etc/conf.d/modules
+    mode: "0644"
+    content: |
+      # NVIDIA GPU (out-of-tree proprietary — must be modules, load early for Xorg)
+      modules="nvidia nvidia-modeset nvidia-drm nvidia-uvm"
+      module_nvidia_drm_args="modeset=1"
+  when: make_video_cards is defined and 'nvidia' in (make_video_cards | default(''))
+
+- name: "[B] Append nvidia-drm.modeset=1 to kernel cmdline"
+  ansible.builtin.lineinfile:
+    path: /etc/default/grub
+    regexp: '^#?GRUB_CMDLINE_LINUX='
+    line: 'GRUB_CMDLINE_LINUX="{{ _grub_cmdline.stdout | trim }} nvidia-drm.modeset=1"'
+  when:
+    - make_video_cards is defined and 'nvidia' in (make_video_cards | default(''))
+    - "'nvidia-drm.modeset' not in (_grub_cmdline.stdout | default(''))"
+
 # ---- sshd hardening (lineinfile on main config — no Include dependency) ----
 - name: "[B] Inject operator SSH key (enables full keys-only lockdown)"
   ansible.builtin.authorized_key:

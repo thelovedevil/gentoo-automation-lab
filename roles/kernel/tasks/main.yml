@@ -53,6 +53,32 @@
       CONFIG_NET_SCHED=y
       CONFIG_NF_CONNTRACK=y
       CONFIG_NET_NS=y
+      # nftables built-in (boot-critical firewall — must never depend on module autoload)
+      CONFIG_NETFILTER_NETLINK=y
+      CONFIG_NF_TABLES=y
+      CONFIG_NF_TABLES_INET=y
+      CONFIG_NF_TABLES_IPV4=y
+      CONFIG_NF_TABLES_IPV6=y
+      CONFIG_NFT_CT=y
+      CONFIG_NFT_LIMIT=y
+      CONFIG_NFT_LOG=y
+      CONFIG_NFT_NAT=y
+      CONFIG_NFT_MASQ=y
+      CONFIG_NFT_REJECT=y
+      CONFIG_NFT_REJECT_INET=y
+      CONFIG_NFT_COMPAT=y
+      CONFIG_NFT_FIB=y
+      CONFIG_NFT_FIB_INET=y
+      CONFIG_NFT_FIB_IPV4=y
+      CONFIG_NFT_FIB_IPV6=y
+      CONFIG_NFT_REDIR=y
+      CONFIG_NFT_CHAIN_NAT=y
+      CONFIG_NF_NAT=y
+      CONFIG_NF_REJECT_IPV4=y
+      CONFIG_NF_REJECT_IPV6=y
+      CONFIG_NF_LOG_SYSLOG=y
+      # dm-crypt built-in (LUKS always active — never fail to find module)
+      CONFIG_DM_CRYPT=y
 
 - name: "[A] Install dracut + installkernel"
   ansible.builtin.command: "chroot /mnt/gentoo /bin/bash -lc 'emerge --noreplace sys-kernel/dracut sys-kernel/installkernel'"
