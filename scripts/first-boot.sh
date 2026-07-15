@@ -97,6 +97,29 @@ else
     step "eselect opengl not available — nvidia-drivers handles this automatically"
 fi
 
+# Ensure NVIDIA modules load at boot (out-of-tree, can't be =y)
+if ! grep -q 'nvidia nvidia-modeset nvidia-drm' /etc/conf.d/modules 2>/dev/null; then
+    step "Configuring NVIDIA module loading at boot"
+    cat >> /etc/conf.d/modules << 'MODEOF'
+
+# NVIDIA GPU (out-of-tree proprietary — must be modules, load early for Xorg)
+modules="nvidia nvidia-modeset nvidia-drm nvidia-uvm"
+module_nvidia_drm_args="modeset=1"
+MODEOF
+    ok
+else
+    step "NVIDIA module loading already configured"; ok
+fi
+
+# Ensure nvidia-drm.modeset=1 in GRUB cmdline
+if ! grep -q 'nvidia-drm.modeset=1' /etc/default/grub 2>/dev/null; then
+    step "Adding nvidia-drm.modeset=1 to GRUB cmdline"
+    sed -i 's/^GRUB_CMDLINE_LINUX="\(.*\)"/GRUB_CMDLINE_LINUX="\1 nvidia-drm.modeset=1"/' /etc/default/grub
+    ok
+else
+    step "nvidia-drm.modeset=1 already in GRUB cmdline"; ok
+fi
+
 # ---- Phase 1: System packages ----
 step "Syncing librewolf overlay"
 if emaint sync -r librewolf 2>/dev/null; then
